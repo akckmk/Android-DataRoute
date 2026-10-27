@@ -4,13 +4,16 @@ import android.content.Context
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.FileInputStream
 import java.net.HttpURLConnection
-import java.net.InetAddress
-import java.net.ServerSocket
 import java.net.URL
-import kotlin.concurrent.thread
 
 internal const val PKG = "com.dataroute.app"
-internal const val FAKE_NVR_PORT = 7441 // a real UniFi Protect port; unprivileged so a test can bind it
+/**
+ * A stand-in NVR answering "NVR-OK". CI runs it on the host machine (tools/fake_nvr.py); the emulator reaches the
+ * host at its Wi-Fi gateway address, so the traffic really crosses the Wi-Fi network like a real NVR's would.
+ * (A server on the phone itself wouldn't do: the kernel delivers a device's own address via loopback, never the VPN.)
+ */
+internal const val FAKE_NVR_HOST = "10.0.2.2"
+internal const val FAKE_NVR_PORT = 7441 // a real UniFi Protect port
 internal const val SHOT_DIR = "/data/local/tmp/dataroute-screens"
 
 internal val ctx: Context get() = InstrumentationRegistry.getInstrumentation().targetContext
@@ -50,31 +53,6 @@ internal fun waitFor(timeoutMs: Long, cond: () -> Boolean): Boolean {
 internal fun wifiIp(): String? {
     waitFor(15_000) { NetworkMonitor.snapshot.value.wifi.address != null }
     return NetworkMonitor.snapshot.value.wifi.address
-}
-
-/** A stand-in for the UniFi Protect NVR: answers every HTTP request with "NVR-OK". */
-internal class FakeNvr : AutoCloseable {
-    private val server = ServerSocket(FAKE_NVR_PORT, 50, InetAddress.getByName("0.0.0.0")).apply { reuseAddress = true }
-
-    init {
-        thread(isDaemon = true) {
-            while (!server.isClosed) {
-                val s = try { server.accept() } catch (e: Exception) { return@thread }
-                thread(isDaemon = true) {
-                    s.use {
-                        val reader = it.getInputStream().bufferedReader()
-                        while (true) { val line = reader.readLine() ?: break; if (line.isEmpty()) break }
-                        val body = "NVR-OK"
-                        it.getOutputStream().write(
-                            "HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body".toByteArray(),
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    override fun close() = server.close()
 }
 
 /** A plain HTTP GET through the normal network stack, i.e. exactly the way any other app's traffic travels. */

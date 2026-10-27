@@ -21,18 +21,15 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class UserJourneyTest {
     @get:Rule val compose = createEmptyComposeRule()
-    private var nvr: FakeNvr? = null
 
     @Before fun setUp() {
         prepareDevice()
         Prefs(ctx).save(Config())
-        nvr = FakeNvr()
     }
 
     @After fun tearDown() {
         RouteVpnService.stop(ctx)
         waitFor(10_000) { VpnStatus.state.value == VpnState.STOPPED }
-        nvr?.close()
         Prefs(ctx).save(Config())
     }
 
@@ -40,7 +37,7 @@ class UserJourneyTest {
         compose.waitUntil(timeoutMs) { compose.onAllNodesWithText(text, substring = substring).fetchSemanticsNodes().isNotEmpty() }
 
     @Test fun firstRunToCameras() {
-        val ip = wifiIp() ?: "192.168.1.10"
+        val ip = FAKE_NVR_HOST
         ActivityScenario.launch(MainActivity::class.java).use {
             // 1. First launch
             compose.onNodeWithText("Routing is OFF").assertIsDisplayed()
@@ -61,7 +58,7 @@ class UserJourneyTest {
             waitForText("Routing is ON")
             screenshot("03_home_on")
 
-            // 4. Add a home service (a stand-in Home Assistant on the Wi-Fi address) and see it reachable
+            // 4. Add a home service (the stand-in server, as Home Assistant) and see it reachable
             compose.onNodeWithText("Services").performClick()
             compose.onNodeWithText("Add service").performClick()
             compose.onNodeWithText("Address").performTextInput(ip)

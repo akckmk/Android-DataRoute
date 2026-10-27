@@ -171,8 +171,8 @@ class ForwardEngine(
         executor.execute {
             val reply = try { dns.resolve(plan, query) } catch (e: Exception) { return@execute }
             if (stopped || reply.size > 1500 - 28) return@execute // too big for one packet: the app retries
-            sink.write(PacketBuilder.udp(server, 53, client, clientPort, reply, 0, reply.size))
             events("DNS ${plan.question.name} answered via ${plan.kind}")
+            sink.write(PacketBuilder.udp(server, 53, client, clientPort, reply, 0, reply.size))
         }
         return true
     }

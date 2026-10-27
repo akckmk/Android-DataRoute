@@ -16,18 +16,15 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class SplitRoutingTest {
-    private var nvr: FakeNvr? = null
     private var scenario: ActivityScenario<MainActivity>? = null
 
     @Before fun setUp() {
         prepareDevice()
-        nvr = FakeNvr()
     }
 
     @After fun tearDown() {
         RouteVpnService.stop(ctx)
         waitFor(10_000) { VpnStatus.state.value == VpnState.STOPPED }
-        nvr?.close()
         scenario?.close()
         Prefs(ctx).save(Config())
     }
@@ -37,13 +34,13 @@ class SplitRoutingTest {
         assumeTrue("emulator has no Wi-Fi network", ip != null)
         assumeTrue("emulator has no cellular network", waitFor(15_000) { NetworkMonitor.snapshot.value.cellular.connected })
 
-        Prefs(ctx).save(Config(nvrHost = ip!!, internetMode = InternetMode.ALWAYS_CELLULAR))
+        Prefs(ctx).save(Config(nvrHost = FAKE_NVR_HOST, internetMode = InternetMode.ALWAYS_CELLULAR))
         scenario = ActivityScenario.launch(MainActivity::class.java) // foreground app may start the service
         RouteVpnService.start(ctx)
         assertTrue("tunnel came up", waitFor(20_000) { VpnStatus.state.value == VpnState.RUNNING })
 
         // Local: the fake NVR on the Wi-Fi address
-        val (nvrCode, nvrBody) = httpGet("http://$ip:$FAKE_NVR_PORT/")
+        val (nvrCode, nvrBody) = httpGet("http://$FAKE_NVR_HOST:$FAKE_NVR_PORT/")
         assertEquals(200, nvrCode)
         assertEquals("NVR-OK", nvrBody)
 
@@ -54,7 +51,7 @@ class SplitRoutingTest {
         // And the engine's own accounting confirms which network each one actually used
         assertTrue("NVR bytes went over Wi-Fi", waitFor(5_000) { VpnStatus.traffic.value.wifiDown > 0 })
         assertTrue("internet bytes went over cellular", waitFor(5_000) { VpnStatus.traffic.value.cellDown > 0 })
-        assertTrue(EventLog.lines.value.any { it.contains("$ip:$FAKE_NVR_PORT via WIFI connected") })
+        assertTrue(EventLog.lines.value.any { it.contains("$FAKE_NVR_HOST:$FAKE_NVR_PORT via WIFI connected") })
         assertTrue(EventLog.lines.value.any { it.contains(":80 via CELLULAR connected") })
     }
 
@@ -62,7 +59,7 @@ class SplitRoutingTest {
     @Test fun localNameResolvesThroughTheTunnel() {
         val ip = wifiIp()
         assumeTrue("emulator has no Wi-Fi network", ip != null)
-        Prefs(ctx).save(Config(nvrHost = ip!!, localHosts = "fakenvr = $ip"))
+        Prefs(ctx).save(Config(nvrHost = FAKE_NVR_HOST, localHosts = "fakenvr = $FAKE_NVR_HOST"))
         scenario = ActivityScenario.launch(MainActivity::class.java)
         RouteVpnService.start(ctx)
         assertTrue("tunnel came up", waitFor(20_000) { VpnStatus.state.value == VpnState.RUNNING })
@@ -70,7 +67,8 @@ class SplitRoutingTest {
         val (code, body) = httpGet("http://fakenvr:$FAKE_NVR_PORT/")
         assertEquals(200, code)
         assertEquals("NVR-OK", body)
-        assertTrue(EventLog.lines.value.any { it.contains("DNS fakenvr answered via HOSTS") })
+        assertTrue("name answered by DataRoute", EventLog.lines.value.any { it.contains("DNS fakenvr answered via HOSTS") })
+        assertTrue("bytes went over Wi-Fi", waitFor(5_000) { VpnStatus.traffic.value.wifiDown > 0 })
     }
 
     @Test fun stopsCleanly() {

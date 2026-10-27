@@ -58,6 +58,11 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Start stand-in NVR on the host (reached from the emulator at 10.0.2.2)
+        run: |
+          nohup python3 tools/fake_nvr.py 7441 > fake_nvr.log 2>&1 &
+          sleep 1 && curl -sf http://127.0.0.1:7441/ && echo " <- fake NVR up"
+
       - name: Build test APKs
         run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
 
