@@ -52,7 +52,6 @@ class RouteVpnService : VpnService() {
         private const val NOTIF_ID = 1
         private const val TUN_ADDRESS = "198.18.77.2"
         private const val MTU = 1500
-        private val FALLBACK_DNS = listOf("1.1.1.1", "8.8.8.8")
 
         fun start(ctx: Context) = send(ctx, ACTION_START)
         fun reload(ctx: Context) = send(ctx, ACTION_RELOAD)
@@ -73,12 +72,10 @@ class RouteVpnService : VpnService() {
     private var config = Config()
 
     @Volatile private var policy = RoutePolicy(emptyList())
-    @Volatile private var dnsServers: List<Int> = emptyList()
     @Volatile private var localDnsSettings = LocalDns.Settings()
 
     /** What the tunnel was built from; if the network drifts from this we rebuild it. */
     private var builtSubnet: Cidr? = null
-    private var builtCarrierDns: List<Int> = emptyList()
     private var reloadPending = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -132,9 +129,7 @@ class RouteVpnService : VpnService() {
             val excluded = ArrayList(RoutePolicy.NEVER_TUNNEL)
             val local = cfg.localNets(snap.wifi.subnet)
             if (cfg.localMode == LocalMode.NATIVE) excluded += local
-            dnsServers = pickDns(cfg, snap, excluded)
             builtSubnet = snap.wifi.subnet
-            builtCarrierDns = snap.cellular.dns
             policy = makePolicy(cfg, snap)
             localDnsSettings = makeLocalDnsSettings(cfg, snap)
 
@@ -145,7 +140,9 @@ class RouteVpnService : VpnService() {
                 .addAddress(TUN_ADDRESS, 32)
                 .allowBypass()
             for (r in Cidr.complement(excluded)) builder.addRoute(Ip.format(r.network), r.prefix)
-            for (d in dnsServers) builder.addDnsServer(Ip.format(d))
+            // Apps ask the virtual server; DataRoute answers home names itself and everything else through the
+            // resolver of the network that carries the internet (works on IPv6-only carriers too).
+            builder.addDnsServer(Ip.format(AndroidUpstream.VIRTUAL_DNS))
             for (pkg in cfg.bypassApps) {
                 try { builder.addDisallowedApplication(pkg) } catch (_: Exception) { /* app was uninstalled */ }
             }
@@ -167,7 +164,10 @@ class RouteVpnService : VpnService() {
             }
             val upstream = AndroidUpstream(this)
             val localDns = if (cfg.localNames) LocalDns({ localDnsSettings }, UpstreamDnsTransport(upstream)) else null
-            val eng = ForwardEngine(sink, upstream, Router { policy.pathFor(it) }, EventLog::add, localDns)
+            val customDns = if (cfg.useCarrierDns) emptyList() else LocalNets.parseDns(cfg.customDns).first
+            val eng = ForwardEngine(
+                sink, upstream, Router { policy.pathFor(it) }, EventLog::add, localDns, NetworkDns(upstream, customDns),
+            )
             engine = eng
 
             thread(name = "dr-tun", isDaemon = true) {
@@ -209,7 +209,13 @@ class RouteVpnService : VpnService() {
                 EventLog.add(
                     "Tunnel up: local ${local.size} prefix(es) → Wi-Fi, internet → " +
                         "${if (viaWifi) "Wi-Fi" else "cellular"}, mode ${cfg.localMode}, " +
-                        "DNS ${dnsServers.joinToString { Ip.format(it) }}",
+                        "DNS ${if (customDns.isEmpty()) "network resolver" else customDns.joinToString { Ip.format(it) }}",
+                )
+                val c = NetworkMonitor.snapshot.value.cellular
+                EventLog.add(
+                    "Cellular: IPv4 ${c.address ?: "none"}, IPv6 ${c.address6 ?: "none"}, " +
+                        "DNS ${c.dnsAll.joinToString { it.hostAddress ?: "?" }.ifEmpty { "none" }}, " +
+                        "NAT64 ${if (c.nat64 != null) "yes" else "no"}",
                 )
             }
         }
@@ -236,8 +242,8 @@ class RouteVpnService : VpnService() {
 
     private fun makePolicy(cfg: Config, snap: NetSnapshot): RoutePolicy {
         val local = cfg.localNets(snap.wifi.subnet)
-        // A carrier DNS server living in 10/8 must still be reached over cellular, not mistaken for LAN.
-        val forced = dnsServers.filter { ip -> local.any { it.contains(ip) } }.toSet()
+        // A carrier DNS server living in 10/8 (an app may query it directly) must still go over cellular.
+        val forced = snap.cellular.dns.filter { ip -> local.any { it.contains(ip) } }.toSet()
         return RoutePolicy(local, forced, internetViaWifi = cfg.internetMode == InternetMode.AUTO && snap.wifi.validated)
     }
 
@@ -246,13 +252,6 @@ class RouteVpnService : VpnService() {
         localSuffixes = (LocalDns.DEFAULT_SUFFIXES + LocalDns.parseSuffixes(cfg.localDomains) + snap.wifi.domains).distinct(),
         wifiDns = snap.wifi.dns,
     )
-
-    private fun pickDns(cfg: Config, snap: NetSnapshot, bypassingTunnel: List<Cidr>): List<Int> {
-        val wanted = if (cfg.useCarrierDns) snap.cellular.dns else LocalNets.parseDns(cfg.customDns).first
-        // A DNS server inside an excluded range would be queried over the default network, not the tunnel.
-        val usable = wanted.filter { ip -> bypassingTunnel.none { it.contains(ip) } }
-        return usable.take(4).ifEmpty { FALLBACK_DNS.mapNotNull(Ip::parse) }
-    }
 
     private fun underlyingFor(snap: NetSnapshot) =
         (if (policy.internetViaWifi) snap.wifi.network else snap.cellular.network) ?: snap.cellular.network ?: snap.wifi.network
@@ -264,8 +263,7 @@ class RouteVpnService : VpnService() {
         underlyingFor(snap)?.let { runCatching { setUnderlyingNetworks(arrayOf(it)) } }
 
         val subnetDrift = cfg.localMode == LocalMode.NATIVE && snap.wifi.subnet != builtSubnet
-        val dnsDrift = cfg.useCarrierDns && snap.cellular.dns.isNotEmpty() && snap.cellular.dns != builtCarrierDns
-        if ((subnetDrift || dnsDrift) && !reloadPending) {
+        if (subnetDrift && !reloadPending) {
             reloadPending = true
             EventLog.add("Network changed, rebuilding tunnel")
             main.postDelayed({ reloadPending = false; startTunnel() }, 1500)

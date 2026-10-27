@@ -37,6 +37,14 @@ interface Upstream {
     fun openUdpRaw(path: Path): DatagramSocket = throw IOException("raw UDP not supported")
 }
 
+/**
+ * Resolves an ordinary (non-home) DNS query over [path] and returns the raw reply, or null on failure.
+ * On Android this is the network's own resolver, which copes with IPv6-only carriers and Private DNS.
+ */
+fun interface PublicDns {
+    fun resolve(path: Path, query: ByteArray): ByteArray?
+}
+
 data class FlowKey(val clientIp: Int, val clientPort: Int, val dstIp: Int, val dstPort: Int) {
     override fun toString() = "${Ip.format(dstIp)}:$dstPort"
 }
@@ -67,6 +75,8 @@ class ForwardEngine(
     internal val events: (String) -> Unit = {},
     /** Answers home-network names (homeassistant.local, nas.lan…) that the carrier's DNS can't. */
     private val localDns: LocalDns? = null,
+    /** When set, every other DNS query is answered through it instead of being relayed as UDP. */
+    private val publicDns: PublicDns? = null,
 ) {
     companion object {
         const val MSS = 1400
@@ -138,7 +148,7 @@ class ForwardEngine(
     private fun handleUdp(ip: Ipv4) {
         val d = UdpDatagram(ip)
         if (!d.valid || d.payloadLen < 0) return
-        if (d.dstPort == 53 && localDns != null && interceptDns(ip, d)) return
+        if (d.dstPort == 53 && (localDns != null || publicDns != null) && interceptDns(ip, d)) return
         val key = FlowKey(ip.src, d.srcPort, ip.dst, d.dstPort)
         var flow = udp[key]
         if (flow == null) {
@@ -162,17 +172,36 @@ class ForwardEngine(
         flow.send(ip.buf, d.payloadOffset, d.payloadLen)
     }
 
-    /** Returns true when the query was for a local name and is being answered here. */
+    /** Returns true when the query is being answered here (home names, or all names when [publicDns] is set). */
     private fun interceptDns(ip: Ipv4, d: UdpDatagram): Boolean {
-        val dns = localDns ?: return false
         val query = ip.buf.copyOfRange(d.payloadOffset, d.payloadOffset + d.payloadLen)
-        val plan = dns.plan(query, query.size) ?: return false
+        val question = Dns.parseQuestion(query, query.size) ?: return false
+        val plan = localDns?.plan(query, query.size)
+        val pub = publicDns
+        if (plan == null && pub == null) return false
         val client = ip.src; val clientPort = d.srcPort; val server = ip.dst
         executor.execute {
-            val reply = try { dns.resolve(plan, query) } catch (e: Exception) { return@execute }
-            if (stopped || reply.size > 1500 - 28) return@execute // too big for one packet: the app retries
-            events("DNS ${plan.question.name} answered via ${plan.kind}")
-            sink.write(PacketBuilder.udp(server, 53, client, clientPort, reply, 0, reply.size))
+            val reply: ByteArray = try {
+                if (plan != null) {
+                    localDns!!.resolve(plan, query).also { events("DNS ${question.name} answered via ${plan.kind}") }
+                } else {
+                    val path = upstream.resolve(router.pathFor(server))
+                    val answer = pub!!.resolve(path, query)
+                    if (answer == null || answer.size < 12) {
+                        events("DNS ${question.name} failed via $path")
+                        Dns.answer(query, question, emptyList(), Dns.RCODE_SERVFAIL)
+                    } else {
+                        answer.also { it[0] = query[0]; it[1] = query[1] } // the app matches replies by ID
+                    }
+                }
+            } catch (e: Exception) {
+                events("DNS ${question.name} failed: ${e.message ?: e.javaClass.simpleName}")
+                Dns.answer(query, question, emptyList(), Dns.RCODE_SERVFAIL)
+            }
+            if (stopped) return@execute
+            // Bigger than one packet: say so (TC bit) rather than staying silent.
+            val out = if (reply.size > 1500 - 28) Dns.truncated(query, question) else reply
+            sink.write(PacketBuilder.udp(server, 53, client, clientPort, out, 0, out.size))
         }
         return true
     }

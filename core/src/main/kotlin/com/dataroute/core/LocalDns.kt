@@ -37,6 +37,10 @@ object Dns {
         return Question(sb.toString().lowercase(), b.u16(i), i + 4)
     }
 
+    /** An empty reply with the TC bit set: "too big for UDP". */
+    fun truncated(query: ByteArray, q: Question): ByteArray =
+        answer(query, q, emptyList()).also { it[2] = (it.u8(2) or 0x02).toByte() }
+
     /** A reply to [query] carrying [ips] as A records (an empty list = NOERROR with no data). */
     fun answer(query: ByteArray, q: Question, ips: List<Int>, rcode: Int = RCODE_OK, ttl: Int = 60): ByteArray {
         val out = ByteArray(q.end + ips.size * 16)

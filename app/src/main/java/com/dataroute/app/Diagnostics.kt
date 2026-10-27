@@ -34,9 +34,23 @@ object Diagnostics {
         }
         out += http("Internet via cellular (direct)", snap.cellular.network, snap.cellular.connected)
         out += http("Internet via Wi-Fi (direct)", snap.wifi.network, snap.wifi.connected)
-        if (tunnelUp) out += http("Internet through tunnel", null, true)
+        if (tunnelUp) {
+            out += lookup("Name lookup through tunnel")
+            out += http("Internet through tunnel", null, true)
+        }
         for (svc in cfg.services) out += probeBlocking(svc, snap, tunnelUp).copy(name = "${svc.name} (${svc.address})")
         out
+    }
+
+    /** Resolves a public name the way any app would, so a DNS failure shows up as its own line. */
+    private fun lookup(name: String): TestResult {
+        val t0 = System.nanoTime()
+        return try {
+            val a = InetAddress.getAllByName("connectivitycheck.gstatic.com")
+            TestResult(name, true, "${a.first().hostAddress} · ${(System.nanoTime() - t0) / 1_000_000} ms")
+        } catch (e: Exception) {
+            TestResult(name, false, "${e.message ?: e.javaClass.simpleName}. Check the Log tab for the DNS line.")
+        }
     }
 
     /** Is this home service answering? Through the tunnel when it's up (as apps see it), else straight over Wi-Fi. */

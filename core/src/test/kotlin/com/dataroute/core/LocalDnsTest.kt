@@ -144,4 +144,43 @@ class LocalDnsTest {
             engine.stop()
         }
     }
+
+    @Test fun publicNamesGoThroughTheNetworkResolver() {
+        val tun = Ip.parse("198.18.77.2")!!; val fakeDns = Ip.parse("198.18.77.53")!!
+        val out = LinkedBlockingQueue<ByteArray>()
+        val asked = ConcurrentLinkedQueue<Pair<Path, String>>()
+        val up = object : Upstream {
+            override fun openTcp(path: Path, dstIp: Int, dstPort: Int) = Socket()
+            override fun openUdp(path: Path, dstIp: Int, dstPort: Int): DatagramSocket = error("DNS must not be relayed as UDP")
+        }
+        val pub = PublicDns { path, q ->
+            val name = Dns.parseQuestion(q, q.size)!!.name
+            asked += path to name
+            when (name) {
+                "claude.ai" -> Dns.answer(q, Dns.parseQuestion(q, q.size)!!, listOf(Ip.parse("160.79.104.10")!!)).also { it[0] = 0x55; it[1] = 0x66 }
+                "huge.example" -> Dns.answer(q, Dns.parseQuestion(q, q.size)!!, List(120) { i -> i })
+                else -> null
+            }
+        }
+        val engine = ForwardEngine({ out.add(it) }, up, RoutePolicy(emptyList()), {}, null, pub)
+        fun ask(name: String, id: Int): ByteArray {
+            val q = query(name, id = id)
+            engine.onPacket(PacketBuilder.udp(tun, 41000, fakeDns, 53, q, 0, q.size), 28 + q.size)
+            val pkt = out.poll(3, TimeUnit.SECONDS)!!
+            val d = UdpDatagram(Ipv4(pkt, pkt.size))
+            return pkt.copyOfRange(d.payloadOffset, d.payloadOffset + d.payloadLen)
+        }
+        try {
+            val ok = ask("claude.ai", 0x1234)
+            assertEquals(0x1234, Dns.id(ok), "reply keeps the app's query ID")
+            assertEquals(listOf(Ip.parse("160.79.104.10")!!), answers(ok))
+            val fail = ask("nowhere.example", 0x2222)
+            assertEquals(Dns.RCODE_SERVFAIL, fail.u8(3) and 0x0F)
+            val big = ask("huge.example", 0x3333)
+            assertTrue((big.u8(2) and 0x02) != 0, "oversized answer is flagged as truncated")
+            assertEquals(Path.CELLULAR, asked.first().first)
+        } finally {
+            engine.stop()
+        }
+    }
 }

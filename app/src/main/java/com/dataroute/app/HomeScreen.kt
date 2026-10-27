@@ -191,7 +191,7 @@ private fun NetBubble(modifier: Modifier, title: String, subtitle: String, icon:
         }
         if (info.connected) {
             Text(
-                listOfNotNull(info.address, info.gateway?.let { "Router $it" }).joinToString("\n"),
+                listOfNotNull(info.address ?: info.address6, info.gateway?.let { "Router $it" }).joinToString("\n"),
                 style = MaterialTheme.typography.bodySmall, color = DR.Sub,
             )
         }

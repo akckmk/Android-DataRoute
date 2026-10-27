@@ -17,6 +17,16 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // One fixed (debug-grade) key for every build, so a newer APK installs over the old one.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("keystore/dataroute-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

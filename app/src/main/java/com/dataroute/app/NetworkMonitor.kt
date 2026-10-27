@@ -23,6 +23,12 @@ data class NetInfo(
     val dns: List<Int> = emptyList(),
     /** Search domains handed out by this network (e.g. the UniFi gateway's domain name). */
     val domains: List<String> = emptyList(),
+    /** Every DNS server, IPv6 included (IPv6-only carriers have no IPv4 DNS at all). */
+    val dnsAll: List<java.net.InetAddress> = emptyList(),
+    /** First IPv6 address, shown when the network has no IPv4 of its own. */
+    val address6: String? = null,
+    /** The network's NAT64 /96 prefix (12 bytes), for reaching IPv4 hosts on an IPv6-only network. */
+    val nat64: List<Byte>? = null,
 ) {
     val connected: Boolean get() = network != null
 }
@@ -106,12 +112,19 @@ object NetworkMonitor {
             val v4 = lp.linkAddresses.firstOrNull { it.address is Inet4Address }
             val gw = lp.routes.firstOrNull { it.isDefaultRoute && it.gateway is Inet4Address }?.gateway?.hostAddress
             val dns = lp.dnsServers.filterIsInstance<Inet4Address>().map { Ip.fromBytes(it.address) }
+            val v6 = lp.linkAddresses.firstOrNull { it.address is java.net.Inet6Address && !it.address.isLinkLocalAddress }
+            val nat64 = if (android.os.Build.VERSION.SDK_INT >= 30) {
+                lp.nat64Prefix?.takeIf { it.prefixLength == 96 }?.rawAddress?.copyOf(12)?.toList()
+            } else null
             update(network) {
                 it.copy(
                     address = v4?.address?.hostAddress,
                     subnet = v4?.let { a -> Cidr.of(Ip.fromBytes(a.address.address), a.prefixLength) },
                     gateway = gw,
                     dns = dns,
+                    dnsAll = lp.dnsServers.toList(),
+                    address6 = v6?.address?.hostAddress,
+                    nat64 = nat64,
                     domains = lp.domains?.split(' ', ',')?.map { d -> d.trim().trim('.').lowercase() }?.filter { d -> d.isNotEmpty() } ?: emptyList(),
                 )
             }
