@@ -53,16 +53,17 @@ object DR {
     val heroOff = Brush.linearGradient(listOf(GrapeSoft, PinkSoft))
 }
 
+/** Static weight instances (cut from the variable fonts) so each weight renders exactly as designed. */
 val Fredoka = FontFamily(
-    Font(R.font.fredoka, FontWeight.Medium),
-    Font(R.font.fredoka, FontWeight.SemiBold),
-    Font(R.font.fredoka, FontWeight.Bold),
+    Font(R.font.fredoka_500, FontWeight.Medium),
+    Font(R.font.fredoka_600, FontWeight.SemiBold),
+    Font(R.font.fredoka_700, FontWeight.Bold),
 )
 val Nunito = FontFamily(
-    Font(R.font.nunito, FontWeight.Normal),
-    Font(R.font.nunito, FontWeight.SemiBold),
-    Font(R.font.nunito, FontWeight.Bold),
-    Font(R.font.nunito, FontWeight.ExtraBold),
+    Font(R.font.nunito_400, FontWeight.Normal),
+    Font(R.font.nunito_600, FontWeight.SemiBold),
+    Font(R.font.nunito_700, FontWeight.Bold),
+    Font(R.font.nunito_800, FontWeight.ExtraBold),
 )
 
 private val scheme = lightColorScheme(
