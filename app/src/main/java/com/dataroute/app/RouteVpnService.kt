@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Build
 import android.os.Handler
@@ -193,12 +195,23 @@ class RouteVpnService : VpnService() {
                 }
             }
 
-            VpnStatus.setState(VpnState.RUNNING)
-            EventLog.add(
-                "Tunnel up: local ${local.size} prefix(es) → Wi-Fi, internet → " +
-                    "${if (policy.internetViaWifi) "Wi-Fi" else "cellular"}, mode ${cfg.localMode}, " +
-                    "DNS ${dnsServers.joinToString { Ip.format(it) }}",
-            )
+            // Android takes a moment to start sending apps into a new VPN; only say "ON" once it really is.
+            val viaWifi = policy.internetViaWifi
+            s.launch {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                var ready = false
+                for (i in 0 until 50) {
+                    if (cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) { ready = true; break }
+                    delay(100)
+                }
+                if (!ready) EventLog.add("Note: Android hasn't reported the VPN as active yet")
+                VpnStatus.setState(VpnState.RUNNING)
+                EventLog.add(
+                    "Tunnel up: local ${local.size} prefix(es) → Wi-Fi, internet → " +
+                        "${if (viaWifi) "Wi-Fi" else "cellular"}, mode ${cfg.localMode}, " +
+                        "DNS ${dnsServers.joinToString { Ip.format(it) }}",
+                )
+            }
         }
     }
 
