@@ -42,6 +42,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write   # to commit the screenshots back to docs/screenshots on this branch
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -77,6 +79,26 @@ jobs:
             ./gradlew :app:connectedDebugAndroidTest --no-daemon || touch tests_failed
             mkdir -p emulator-screens && adb pull /data/local/tmp/dataroute-screens/. emulator-screens/ || true
             test ! -f tests_failed
+
+      # Keeps the latest screenshots browsable in the repo (pushes made with GITHUB_TOKEN don't trigger CI again).
+      - name: Commit screenshots to docs/screenshots
+        if: always() && github.event_name == 'push'
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          [ -n "$(ls -A emulator-screens 2>/dev/null)" ] || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3; do
+            git fetch -q origin "$BRANCH" && git checkout -q -B screens "origin/$BRANCH"
+            rm -rf docs/screenshots && mkdir -p docs/screenshots && cp emulator-screens/*.png docs/screenshots/
+            git add docs/screenshots
+            git diff --cached --quiet && exit 0
+            git commit -q -m "Emulator screenshots for ${GITHUB_SHA::7} [skip ci]"
+            git push -q origin "HEAD:$BRANCH" && exit 0
+            sleep $((attempt * 5))
+          done
+          exit 1
 
       - uses: actions/upload-artifact@v4
         if: always()
