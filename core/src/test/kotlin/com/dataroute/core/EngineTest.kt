@@ -26,11 +26,12 @@ private val WEB_IP = Ip.parse("142.250.80.46")!!       // "internet" -> cellular
 private val DEAD_IP = Ip.parse("192.168.1.99")!!       // upstream refuses
 
 /** Plays the part of the TUN device: engine output lands in [outbound], engine input is [ForwardEngine.onPacket]. */
-private class Harness(val serverPort: Int, val udpPort: Int = 0) {
+private class Harness(val serverPort: Int, val udpPort: Int = 0, val cellularUp: Boolean = true) {
     val outbound = LinkedBlockingQueue<ByteArray>()
     val used = ConcurrentLinkedQueue<Pair<Path, Int>>()
     val events = ConcurrentLinkedQueue<String>()
     val upstream = object : Upstream {
+        override fun resolve(wanted: Path) = if (wanted == Path.CELLULAR && !cellularUp) Path.WIFI else wanted
         override fun openTcp(path: Path, dstIp: Int, dstPort: Int): Socket {
             used += path to dstIp
             if (dstIp == DEAD_IP) throw IOException("refused")
@@ -200,6 +201,18 @@ class EngineTest {
         assertEquals(setOf(Path.CELLULAR to WEB_IP, Path.WIFI to NVR_IP), h.used.toSet())
         assertEquals(100L, h.engine.stats.cellUp.get()); assertEquals(50L, h.engine.stats.wifiUp.get())
         web.stop(); nvr.stop()
+    }
+
+    @Test fun fallbackPathIsWhatGetsAccounted() {
+        val ss = echoServer()
+        val h = Harness(ss.localPort, cellularUp = false).also { closers += { it.engine.stop() } }
+        val c = h.client(WEB_IP) // internet destination, but there is no cellular network
+        assertTrue(c.connect())
+        c.send(ByteArray(10))
+        assertTrue(c.waitFor(5000) { c.bytes().size == 10 })
+        assertEquals(listOf(Path.WIFI to WEB_IP), h.used.toList())
+        assertEquals(10L, h.engine.stats.wifiUp.get()); assertEquals(0L, h.engine.stats.cellUp.get())
+        c.stop()
     }
 
     @Test fun bulkUploadAndDownloadKeepIntegrity() {

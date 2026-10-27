@@ -18,6 +18,12 @@ fun interface PacketSink {
 
 /** Opens sockets on the physical network that corresponds to a [Path]. */
 interface Upstream {
+    /**
+     * The path that will really be used for [wanted], e.g. Wi-Fi when cellular is unavailable.
+     * Called once per new flow so traffic is accounted to the network it actually took.
+     */
+    fun resolve(wanted: Path): Path = wanted
+
     /** Returns a *connected* socket (blocking until connected or throwing). */
     @Throws(IOException::class)
     fun openTcp(path: Path, dstIp: Int, dstPort: Int): Socket
@@ -131,7 +137,7 @@ class ForwardEngine(
         if (flow == null) {
             if (udp.size >= MAX_UDP_FLOWS) return
             val created = try {
-                UdpFlow(this, key, router.pathFor(ip.dst))
+                UdpFlow(this, key, upstream.resolve(router.pathFor(ip.dst)))
             } catch (e: IOException) {
                 events("UDP ${key} failed: ${e.message}")
                 return

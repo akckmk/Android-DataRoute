@@ -18,12 +18,17 @@ import java.net.SocketAddress
  */
 class AndroidUpstream(private val vpn: VpnService) : Upstream {
 
+    // No cellular (e.g. mobile data off): fall back to Wi-Fi so a healthy Wi-Fi still works.
+    override fun resolve(wanted: Path): Path {
+        val s = NetworkMonitor.snapshot.value
+        return if (wanted == Path.CELLULAR && s.cellular.network == null && s.wifi.network != null) Path.WIFI else wanted
+    }
+
     private fun networkFor(path: Path): Network {
         val s = NetworkMonitor.snapshot.value
         return when (path) {
             Path.WIFI -> s.wifi.network ?: throw IOException("Wi-Fi is not connected")
-            // No cellular (e.g. mobile data off): fall back to Wi-Fi so a healthy Wi-Fi still works.
-            Path.CELLULAR -> s.cellular.network ?: s.wifi.network ?: throw IOException("No cellular network (is mobile data on?)")
+            Path.CELLULAR -> s.cellular.network ?: throw IOException("No cellular network (is mobile data on?)")
         }
     }
 

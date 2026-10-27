@@ -65,7 +65,7 @@ internal class TcpFlow(
     // ---- connection setup / upstream side (runs on a pool thread) ----
 
     fun run() {
-        path = engine.router.pathFor(key.dstIp)
+        path = engine.upstream.resolve(engine.router.pathFor(key.dstIp))
         val sock = try {
             engine.upstream.openTcp(path, key.dstIp, key.dstPort)
         } catch (e: Exception) {

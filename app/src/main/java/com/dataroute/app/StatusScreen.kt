@@ -85,6 +85,7 @@ fun StatusScreen(vm: MainViewModel, onToggle: () -> Unit) {
 
         val hints = buildList {
             if (!snap.cellular.connected) add("Cellular isn't connected. Turn on mobile data, otherwise internet traffic has nowhere to go.")
+            if (running && !snap.wifi.connected) add("Wi-Fi isn't connected, so the NVR can't be reached. Join your UniFi Wi-Fi.")
             if (cfg.nvrHost.isBlank()) add("Add your NVR's IP address in Settings so it can be tested.")
             if (snap.wifi.connected && snap.wifi.validated && cfg.internetMode == InternetMode.AUTO) {
                 add("Wi-Fi currently has working internet, so internet traffic stays on Wi-Fi. It switches to cellular automatically if Wi-Fi's ISP goes down.")
