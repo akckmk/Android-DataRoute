@@ -118,3 +118,33 @@ jobs:
           name: emulator-test-report
           path: app/build/reports/androidTests/connected
           if-no-files-found: warn
+
+  # One permanent link to the newest *tested* APK:
+  #   https://github.com/<owner>/<repo>/releases/download/latest/DataRoute.apk
+  # Runs only after both the build and the emulator tests passed on a push.
+  release:
+    needs: [build, emulator]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: DataRoute-debug-apk
+          path: apk
+
+      - name: Publish as the "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cp apk/app-debug.apk DataRoute.apk
+          NOTES="Newest tested build of DataRoute: commit ${GITHUB_SHA::7} on ${GITHUB_REF_NAME}, $(date -u '+%Y-%m-%d %H:%M UTC').
+          Passed the packet-engine unit tests and the instrumented tests on an Android 16 emulator.
+
+          Install: open DataRoute.apk on your phone and allow installs from your browser or Files app.
+          Signed with the project's fixed debug-grade key, so it installs over earlier builds from this release."
+          # Recreate so the 'latest' tag always points at this commit; the download URL stays the same.
+          gh release delete latest --cleanup-tag --yes 2>/dev/null || true
+          gh release create latest DataRoute.apk --target "$GITHUB_SHA" --title "DataRoute (latest tested build)" --notes "$NOTES" --latest

@@ -50,7 +50,9 @@ Plex, Jellyfin, a NAS (Synology, QNAP, TrueNAS, Unraid), Pi-hole, Frigate, Nextc
 
 ## Using it
 
-1. Install the APK (from the **Actions → Android CI → DataRoute-debug-apk** artifact, or build it yourself).
+1. Install the APK. Direct link to the newest tested build:
+   **https://github.com/akckmk/Android-DataRoute/releases/download/latest/DataRoute.apk**
+   (or the **Actions → Android CI → DataRoute-debug-apk** artifact, or build it yourself).
 2. Open **Settings** and enter your NVR/console IP (e.g. `192.168.1.10`). Defaults treat all private ranges as local.
 3. Connect to your UniFi Wi-Fi. If Android asks *"This network has no internet, stay connected?"* choose **stay**.
    Make sure **mobile data is on**.
