@@ -112,6 +112,10 @@ class RouteVpnService : VpnService() {
             VpnStatus.setState(VpnState.STARTING)
             NetworkMonitor.start(applicationContext)
 
+            // prepare() is what makes this app Android's active VPN app (when the user has consented before).
+            // The UI calls it too, but the tile, a settings reload or a system restart may start us directly.
+            if (VpnService.prepare(this) != null) return fail("Open DataRoute and tap Start routing to allow the VPN connection")
+
             val cfg = Prefs(this).load()
             config = cfg
             cfg.errors().firstOrNull()?.let { return fail("Settings problem: $it") }
