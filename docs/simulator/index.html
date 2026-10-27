@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Interactive DataRoute demo: knock out your home internet, then open Plex, Home Assistant, cameras, video or Claude and see which network carries each one.">
+<title>DataRoute Phone Simulator</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600;700;800&display=swap">
+<style>
+/* Base reset (the hosted version got these from its page skeleton). */
+[hidden] { display: none !important; }
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+img { max-width: 100%; }
+/* Layout: a friendly playroom: one big phone running the real app screens, and bubbly control cards beside it. */
+:root {
+  color-scheme: light;
+  --bg: #f6f4ff; --card: #ffffff; --ink: #23213a; --sub: #625f7d; --line: #e4e0f7;
+  --grape: #6c5ce7; --grape-ink: #5341d6; --grape-soft: #ece9ff;
+  --pink: #ff6fb5; --pink-soft: #ffe4f2;
+  --sky: #2d8cff; --sky-ink: #1460c9; --sky-soft: #e0eeff;
+  --tan: #ff8a3d; --tan-ink: #b4500e; --tan-soft: #ffebdd;
+  --mint: #12b886; --mint-ink: #0b7a58; --mint-soft: #d9f7ec;
+  --coral: #e5484d; --coral-ink: #c0262c; --coral-soft: #ffe3e3;
+  --sun: #ffc53d; --sun-ink: #8a5a00; --sun-soft: #fff4d6;
+  --display: "Fredoka", "Nunito", system-ui, sans-serif;
+  --text: "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--text); font-size: 16px; line-height: 1.5; margin: 0;
+  padding-block: 32px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+body::before { content: ""; position: fixed; inset: -20vmax auto auto -20vmax; width: 60vmax; height: 60vmax; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,111,181,.18), transparent 60%); pointer-events: none; z-index: 0; }
+body::after { content: ""; position: fixed; inset: auto -15vmax -25vmax auto; width: 60vmax; height: 60vmax; border-radius: 50%;
+  background: radial-gradient(circle, rgba(45,140,255,.16), transparent 60%); pointer-events: none; z-index: 0; }
+.wrap { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+header h1 { font-family: var(--display); font-weight: 600; font-size: clamp(36px, 6vw, 56px); line-height: 1.05; margin: 8px 0 0; text-wrap: balance; }
+header h1 span { background: linear-gradient(90deg, var(--grape), var(--pink)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+header p { margin: 10px 0 0; color: var(--sub); max-width: 64ch; font-size: 17px; }
+.chip { display: inline-flex; gap: 6px; align-items: center; background: var(--card); border-radius: 999px; padding: 4px 12px; font-weight: 700; font-size: 13px; color: var(--grape-ink); box-shadow: 0 1px 2px rgba(35,33,58,.06); }
+.stage { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 32px; align-items: start; }
+@media (max-width: 900px) { .stage { grid-template-columns: 1fr; justify-items: center; } .side { width: 100%; } }
+
+/* ---------- phone ---------- */
+.phone { width: 370px; max-width: 100%; aspect-ratio: 1440 / 3120; background: #1d1b2c; border-radius: 46px; padding: 11px; position: relative;
+  box-shadow: 0 30px 60px -20px rgba(108,92,231,.45), 0 0 0 2px #2c2a40; }
+.screen { width: 100%; height: 100%; border-radius: 36px; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; position: relative; font-size: 13px; line-height: 18px; }
+.sbar { height: 32px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font-size: 12px; font-weight: 800; }
+.sbar .ic { display: flex; gap: 6px; align-items: center; }
+.punch { position: absolute; top: 10px; left: 50%; width: 12px; height: 12px; margin-left: -6px; background: #111; border-radius: 50%; }
+.key { font-size: 9px; padding: 0 4px; border: 1.5px solid var(--ink); border-radius: 4px; line-height: 12px; }
+.content { flex: 1; overflow-y: auto; padding: 8px 14px 14px; display: flex; flex-direction: column; gap: 10px; scrollbar-width: none; }
+.content::-webkit-scrollbar { display: none; }
+.t-title { font-family: var(--display); font-weight: 600; font-size: 25px; line-height: 30px; margin: 4px 0 0; }
+.t-sub { color: var(--sub); font-size: 12px; line-height: 16px; margin: 0; }
+.bub { background: var(--card); border-radius: 22px; padding: 14px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 1px 2px rgba(35,33,58,.06); }
+.bub h3 { margin: 0; font-family: var(--display); font-weight: 500; font-size: 16px; line-height: 20px; }
+.hero { border-radius: 26px; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: linear-gradient(135deg, var(--grape-soft), var(--pink-soft)); }
+.hero.on { background: linear-gradient(135deg, var(--grape), #9b6cf2, var(--pink)); color: #fff; }
+.hero .top { display: flex; gap: 10px; align-items: center; }
+.hero h2 { font-family: var(--display); font-weight: 600; font-size: 21px; margin: 0; }
+.blob { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+.blob svg { width: 19px; height: 19px; }
+.route { display: inline-flex; gap: 8px; align-items: center; align-self: flex-start; background: rgba(255,255,255,.22); border-radius: 999px; padding: 5px 12px; font-weight: 800; font-size: 12px; }
+.route svg { width: 14px; height: 14px; fill: #fff; }
+.btn { font: 800 13px/18px var(--text); border: 0; border-radius: 999px; padding: 9px 16px; background: var(--grape); color: #fff; cursor: pointer; }
+.btn.big { width: 100%; padding: 12px; font-size: 14px; }
+.btn.white { background: #fff; color: var(--grape-ink); }
+.btn.line { background: transparent; color: var(--grape-ink); box-shadow: inset 0 0 0 1.5px #b9b3dd; }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn:focus-visible, .navi:focus-visible, .sw:focus-visible, .radio:focus-visible, .tg:focus-visible, .app:focus-visible, .kind:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.between { justify-content: space-between; }
+.pill { display: inline-flex; gap: 5px; align-items: center; align-self: flex-start; border-radius: 999px; padding: 3px 10px; font-weight: 800; font-size: 11px; }
+.p-ok { background: var(--mint-soft); color: var(--mint-ink); } .p-bad { background: var(--coral-soft); color: var(--coral-ink); }
+.p-off { background: var(--grape-soft); color: var(--sub); } .p-sun { background: var(--sun-soft); color: var(--sun-ink); }
+.nets { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.small { font-size: 11.5px; line-height: 15px; color: var(--sub); }
+.res { display: grid; grid-template-columns: 24px 1fr; gap: 8px; align-items: start; }
+.res .dot { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 12px; }
+.svc { display: grid; grid-template-columns: 40px 1fr; gap: 10px; align-items: center; }
+.nav { flex: none; display: flex; background: var(--card); padding: 6px 4px 14px; }
+.navi { flex: 1; border: 0; background: none; font: 800 10.5px/14px var(--text); color: var(--sub); display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; padding: 0; }
+.navi .pi { width: 50px; height: 26px; border-radius: 13px; display: grid; place-items: center; }
+.navi svg { width: 18px; height: 18px; fill: currentColor; }
+.navi[aria-current="page"] { color: var(--grape-ink); }
+.navi[aria-current="page"] .pi { background: var(--grape-soft); }
+.field { display: flex; flex-direction: column; gap: 3px; }
+.field label { font-size: 11px; font-weight: 800; color: var(--grape-ink); }
+.field input { font: 14px/20px var(--text); padding: 8px 12px; border: 1.5px solid #b9b3dd; border-radius: 14px; background: #fff; color: var(--ink); width: 100%; }
+.sw { width: 42px; height: 24px; border-radius: 12px; border: 0; background: #d7d2f0; position: relative; cursor: pointer; flex: none; padding: 0; }
+.sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.sw[aria-checked="true"] { background: var(--grape); }
+.sw[aria-checked="true"]::after { left: 21px; }
+.radio { display: grid; grid-template-columns: 20px 1fr; gap: 8px; text-align: left; background: none; border: 0; padding: 3px 0; cursor: pointer; font-family: var(--text); color: var(--ink); }
+.radio .rd { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #b9b3dd; margin-top: 1px; display: grid; place-items: center; }
+.radio[aria-checked="true"] .rd { border-color: var(--grape); }
+.radio[aria-checked="true"] .rd::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--grape); }
+.radio b { font-weight: 700; font-size: 13px; display: block; }
+.radio span span { font-size: 11px; line-height: 14px; color: var(--sub); display: block; }
+.log { font: 10px/15px ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+.log .w { color: var(--sky-ink); } .log .c { color: var(--tan-ink); } .log .x { color: var(--coral-ink); }
+
+/* other apps on the phone (simulated) */
+.overlay { position: absolute; inset: 32px 0 0; background: #fff; display: flex; flex-direction: column; }
+.overlay .bar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; font-family: var(--display); font-weight: 600; font-size: 16px; }
+.overlay .back { border: 0; background: var(--grape-soft); color: var(--grape-ink); border-radius: 999px; padding: 5px 12px; font: 800 12px var(--text); cursor: pointer; }
+.overlay .body { flex: 1; padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+.dark { background: #15141f; color: #eceaf7; } .dark .bar { color: #fff; } .dark .back { background: #2c2a40; color: #fff; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.cam { aspect-ratio: 16/9; border-radius: 12px; position: relative; overflow: hidden; background: #26313a; }
+.cam canvas { width: 100%; height: 100%; display: block; }
+.cam .nm { position: absolute; left: 8px; bottom: 5px; font-size: 10px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px #000; }
+.cam .lv { position: absolute; right: 7px; top: 6px; font-size: 9px; font-weight: 800; color: #fff; background: #e5484d; padding: 0 5px; border-radius: 5px; }
+.poster { aspect-ratio: 2/3; border-radius: 10px; display: flex; align-items: flex-end; padding: 6px; font-size: 10px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.5); }
+.tile { border-radius: 16px; padding: 10px; background: var(--grape-soft); display: flex; flex-direction: column; gap: 2px; font-size: 12px; font-weight: 700; }
+.tile b { font-family: var(--display); font-size: 18px; font-weight: 600; }
+.tile.on { background: var(--sun-soft); }
+.fail { background: var(--coral-soft); color: var(--coral-ink); border-radius: 16px; padding: 12px; font-size: 13px; line-height: 18px; font-weight: 600; }
+.bubble { background: var(--grape-soft); border-radius: 16px; padding: 8px 12px; max-width: 88%; font-size: 13px; }
+.bubble.me { align-self: flex-end; background: var(--grape); color: #fff; }
+.prog { height: 5px; background: #2c2a40; border-radius: 3px; overflow: hidden; }
+.prog i { display: block; height: 100%; width: 0; background: var(--pink); animation: fill 6s linear infinite; }
+@keyframes fill { to { width: 100%; } }
+.bar-s { height: 10px; border-radius: 5px; background: var(--grape-soft); overflow: hidden; }
+.bar-s i { display: block; height: 100%; width: 62%; background: linear-gradient(90deg, var(--grape), var(--pink)); }
+
+/* ---------- side panels ---------- */
+.side { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.panel { background: var(--card); border-radius: 28px; padding: 24px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 1px 2px rgba(35,33,58,.06), 0 12px 30px -18px rgba(108,92,231,.35); }
+.panel h2 { font-family: var(--display); font-weight: 600; font-size: 26px; line-height: 30px; margin: 0; }
+.panel p { margin: 0; color: var(--sub); }
+.toggles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.tg { display: flex; flex-direction: column; gap: 4px; border: 0; border-radius: 20px; padding: 12px 14px; cursor: pointer; text-align: left; font: 800 15px var(--text); }
+.tg small { font-weight: 700; font-size: 12.5px; }
+.tg.on { background: var(--mint-soft); color: var(--mint-ink); } .tg.off { background: var(--coral-soft); color: var(--coral-ink); }
+.apps { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.app { display: flex; gap: 10px; align-items: center; border: 0; border-radius: 20px; padding: 10px 12px; cursor: pointer; text-align: left; font: 800 14px/18px var(--text); color: var(--ink); background: var(--bg); }
+.app small { display: block; font-weight: 600; font-size: 12px; color: var(--sub); }
+.app:hover, .tg:hover { filter: brightness(.97); }
+.grp { font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--sub); margin-top: 4px; }
+.diagram { width: 100%; height: auto; display: block; }
+.verdict { border-radius: 20px; padding: 14px 16px; background: var(--bg); font-weight: 600; min-height: 52px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--sub); font-weight: 700; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+footer { color: var(--sub); font-size: 14px; }
+@media (prefers-reduced-motion: reduce) { .prog i { animation: none; width: 60%; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <span class="chip">Interactive demo · Galaxy S26 Ultra shape</span>
+    <h1>Try <span>DataRoute</span> on a phone</h1>
+    <p>Pretend your home internet just went down. Flip the switches on the right, tap through the app, and open your apps to see which ones work and which network carries them.</p>
+  </header>
+
+  <div class="stage">
+    <div class="phone" aria-label="Simulated phone running DataRoute">
+      <div class="screen">
+        <div class="punch" aria-hidden="true"></div>
+        <div class="sbar"><span id="clock">9:41</span><span class="ic" id="sicons"></span></div>
+        <div class="content" id="content"></div>
+        <nav class="nav" id="nav" aria-label="DataRoute tabs"></nav>
+        <div class="overlay" id="overlay" hidden></div>
+      </div>
+    </div>
+
+    <div class="side">
+      <section class="panel" aria-labelledby="sc-h">
+        <h2 id="sc-h">Your situation</h2>
+        <div class="toggles" id="toggles"></div>
+        <p id="scnote"></p>
+      </section>
+
+      <section class="panel" aria-labelledby="ap-h">
+        <h2 id="ap-h">Open an app</h2>
+        <div class="grp">At home</div>
+        <div class="apps" id="apps-home"></div>
+        <div class="grp">On the internet</div>
+        <div class="apps" id="apps-net"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="rt-h">
+        <div class="row between"><h2 id="rt-h">Where it went</h2><button class="btn" id="tour" type="button">Play the 30-second tour</button></div>
+        <svg class="diagram" id="diagram" viewBox="0 0 640 240" role="img" aria-label="Route diagram: phone to Wi-Fi to home devices, phone to cellular to the internet"></svg>
+        <div class="legend"><span><i style="background:var(--sky)"></i>Wi-Fi (home)</span><span><i style="background:var(--tan)"></i>Cellular</span><span><i style="background:var(--coral)"></i>Didn't get through</span></div>
+        <div class="verdict" id="verdict" aria-live="polite">Open an app to see its route.</div>
+      </section>
+      <footer>This page imitates the real app using the same rules as its code. It runs only in your browser and sends nothing anywhere.</footer>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const ICON = {
+    home: "M10,20v-6h4v6h5v-8h3L12,3 2,12h3v8z",
+    apps: "M4,8h4V4H4v4zM10,20h4v-4h-4v4zM4,20h4v-4H4v4zM4,14h4v-4H4v4zM10,14h4v-4h-4v4zM16,4v4h4V4h-4zM10,8h4V4h-4v4zM16,14h4v-4h-4v4zM16,20h4v-4h-4v4z",
+    tune: "M3,17v2h6v-2H3zM3,5v2h10V5H3zM13,21v-2h8v-2h-8v-2h-2v6h2zM7,9v2H3v2h4v2h2V9H7zM21,13v-2H11v2h10zM15,9h2V7h4V5h-4V3h-2v6z",
+    list: "M3,13h2v-2H3v2zM3,17h2v-2H3v2zM3,9h2V7H3v2zM7,13h14v-2H7v2zM7,17h14v-2H7v2zM7,7v2h14V7H7z",
+    wifi: "M1,9l2,2c4.97,-4.97 13.03,-4.97 18,0l2,-2C16.93,2.93 7.08,2.93 1,9zM9,17l3,3 3,-3c-1.65,-1.66 -4.34,-1.66 -6,0zM5,13l2,2c2.76,-2.76 7.24,-2.76 10,0l2,-2C15.14,9.14 8.87,9.14 5,13z",
+    cell: "M17,4h3v16h-3zM5,14h3v6H5zM11,9h3v11h-3z",
+    shield: "M12,1L3,5v6c0,5.55 3.84,10.74 9,12 5.16,-1.26 9,-6.45 9,-12V5l-9,-4z",
+    globe: "M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM11,19.93c-3.95,-0.49 -7,-3.85 -7,-7.93 0,-0.62 0.08,-1.21 0.21,-1.79L9,15v1c0,1.1 0.9,2 2,2v1.93zM17.9,17.39c-0.26,-0.81 -1,-1.39 -1.9,-1.39h-1v-3c0,-0.55 -0.45,-1 -1,-1H8v-2h2c0.55,0 1,-0.45 1,-1V7h2c1.1,0 2,-0.9 2,-2v-0.41c2.93,1.19 5,4.06 5,7.41 0,2.08 -0.8,3.97 -2.1,5.39z",
+    camera: "M17,10.5V7c0,-0.55 -0.45,-1 -1,-1H4c-0.55,0 -1,0.45 -1,1v10c0,0.55 0.45,1 1,1h12c0.55,0 1,-0.45 1,-1v-3.5l4,4v-11l-4,4z",
+    play: "M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM10,16.5v-9l6,4.5 -6,4.5z",
+    movie: "M18,4l2,4h-3l-2,-4h-2l2,4h-3l-2,-4H8l2,4H7L5,4H4c-1.1,0 -1.99,0.9 -1.99,2L2,18c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V4h-4z",
+    nas: "M2,20h20v-4H2v4zM4,17h2v2H4v-2zM2,4v4h20V4H2zM6,7H4V5h2v2zM2,14h20v-4H2v4zM4,11h2v2H4v-2z",
+    chat: "M20,2H4c-1.1,0 -2,0.9 -2,2v18l4,-4h14c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2z",
+    spark: "M12,2l2.4,7.2L22,12l-7.6,2.8L12,22l-2.4,-7.2L2,12l7.6,-2.8z",
+  };
+  const svg = (n, fill) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="${fill || "currentColor"}" d="${ICON[n]}"/></svg>`;
+  const blob = (n, ink, soft, size) => `<span class="blob" style="background:var(${soft});color:var(${ink});${size ? `width:${size}px;height:${size}px` : ""}">${svg(n)}</span>`;
+
+  const S = {
+    wifi: true, isp: false, cell: true, routing: false, starting: false, tab: "home",
+    cfg: { nvr: "192.168.1.10", internetMode: "AUTO", localMode: "TUNNEL", localNames: true },
+    draft: null, tests: [], testing: false, log: [], traffic: { wd: 0, wu: 0, cd: 0, cu: 0, n: 0 }, app: null,
+  };
+  const SERVICES = [
+    { key: "protect", name: "UniFi Protect", addr: "192.168.1.10:443", icon: "camera", ink: "--sky-ink", soft: "--sky-soft" },
+    { key: "ha", name: "Home Assistant", addr: "homeassistant.local:8123", ip: "192.168.1.40", icon: "home", ink: "--mint-ink", soft: "--mint-soft", byName: true },
+    { key: "plex", name: "Plex", addr: "192.168.1.30:32400", icon: "play", ink: "--sun-ink", soft: "--sun-soft" },
+    { key: "jellyfin", name: "Jellyfin", addr: "jellyfin.lan:8096", ip: "192.168.1.31", icon: "movie", ink: "--grape-ink", soft: "--grape-soft", byName: true },
+    { key: "nas", name: "NAS", addr: "192.168.1.20:5001", icon: "nas", ink: "--tan-ink", soft: "--tan-soft" },
+  ];
+  const NET_APPS = [
+    { key: "video", name: "Stream video", sub: "A video app", icon: "play", ink: "--coral-ink", soft: "--coral-soft", ip: "142.250.80.46", bytes: 6200000 },
+    { key: "claude", name: "Claude", sub: "Ask a question", icon: "spark", ink: "--tan-ink", soft: "--tan-soft", ip: "160.79.104.10", bytes: 48000 },
+    { key: "messages", name: "Google Messages", sub: "Send a message", icon: "chat", ink: "--sky-ink", soft: "--sky-soft", ip: "142.250.64.110", bytes: 12000 },
+  ];
+  const BYTES = { protect: 2400000, ha: 300000, plex: 8000000, jellyfin: 7000000, nas: 900000 };
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const fmt = (b) => b < 1024 ? b + " B" : b < 1048576 ? (b / 1024).toFixed(1) + " KB" : b < 1073741824 ? (b / 1048576).toFixed(1) + " MB" : (b / 1073741824).toFixed(2) + " GB";
+  const now = () => new Date().toTimeString().slice(0, 8);
+  const isIp = (s) => { const p = s.trim().split("."); return p.length === 4 && p.every((x) => /^\d{1,3}$/.test(x) && +x <= 255); };
+
+  // ---------- the routing rules (as in RoutePolicy / LocalDns / AndroidUpstream) ----------
+  const viaWifi = () => S.cfg.internetMode === "AUTO" && S.wifi && S.isp;
+  function route(kind, byName) {
+    if (S.routing) {
+      if (kind === "local") {
+        if (!S.wifi) return { path: null, ok: false, why: "The phone isn't on your home Wi-Fi" };
+        if (byName && !S.cfg.localNames) return { path: "wifi", ok: false, why: "Name lookup is off in Settings → Local names" };
+        return { path: "wifi", ok: true };
+      }
+      let path = viaWifi() ? "wifi" : "cell";
+      if (path === "cell" && !S.cell) path = S.wifi ? "wifi" : null;
+      if (!path) return { path: null, ok: false, why: "No network at all" };
+      if (path === "wifi" && !S.isp) return { path, ok: false, why: "Wi-Fi has no internet and mobile data is off" };
+      return { path, ok: true };
+    }
+    const def = S.wifi && S.isp ? "wifi" : S.cell ? "cell" : S.wifi ? "wifi" : null;
+    if (!def) return { path: null, ok: false, why: "No network" };
+    if (kind === "local") return def === "wifi" ? { path: "wifi", ok: true } : { path: "cell", ok: false, why: "Android sent it over cellular, and your home devices aren't on the internet" };
+    if (def === "wifi" && !S.isp) return { path: "wifi", ok: false, why: "Android stayed on Wi-Fi, and Wi-Fi has no internet" };
+    return { path: def, ok: true };
+  }
+
+  // ---------- phone screens ----------
+  function statusIcons() {
+    $("sicons").innerHTML = (S.routing ? '<span class="key">VPN</span>' : "") + (S.wifi ? `<span>${S.isp ? "Wi-Fi" : "Wi-Fi!"}</span>` : "") + (S.cell ? "<span>5G</span>" : "") + "<span>87%</span>";
+  }
+  function netBub(name, sub, icon, ink, soft, on, ok, ip) {
+    const pill = !on ? '<span class="pill p-off">Off</span>' : ok ? '<span class="pill p-ok">Internet OK</span>' : '<span class="pill p-bad">No internet</span>';
+    return `<div class="bub">${blob(icon, ink, soft)}<div><h3>${name}</h3><div class="small">${sub}</div></div>${pill}${on ? `<div class="small">${ip}</div>` : ""}</div>`;
+  }
+  function home() {
+    const st = S.starting ? "Starting…" : S.routing ? "Routing is ON" : "Routing is OFF";
+    const hints = [];
+    if (!S.cell) hints.push("Cellular isn't connected. Turn on mobile data, otherwise internet traffic has nowhere to go.");
+    if (S.routing && !S.wifi) hints.push("Wi-Fi isn't connected, so home devices can't be reached. Join your home Wi-Fi.");
+    if (S.wifi && S.isp && S.cfg.internetMode === "AUTO") hints.push("Wi-Fi has working internet, so internet stays on Wi-Fi. It switches to cellular automatically if the ISP goes down.");
+    const t = S.traffic;
+    return `<div><p class="t-title">DataRoute</p><p class="t-sub">Home devices on Wi-Fi. Everything else on cellular.</p></div>
+      <div class="hero ${S.routing ? "on" : ""}"><div class="top">${blob("shield", S.routing ? "--grape" : "--grape-ink", "--card", 40)}<h2>${st}</h2></div>
+        ${S.routing ? `<span class="route">${svg("home", "#fff")}Home devices → Wi-Fi</span><span class="route">${svg("globe", "#fff")}Internet → ${viaWifi() ? "Wi-Fi" : "cellular"}</span>`
+          : `<div class="small" style="color:var(--sub)">Turn on to keep cameras, Plex, Home Assistant and your NAS on Wi-Fi while everything else uses cellular.</div>`}
+        <button class="btn big ${S.routing ? "white" : ""}" data-act="toggle" ${S.starting ? "disabled" : ""}>${S.routing || S.starting ? "Stop routing" : "Start routing"}</button></div>
+      ${hints.map((h) => `<div class="bub" style="background:var(--sun-soft)"><div class="small" style="color:var(--ink)">${h}</div></div>`).join("")}
+      <div class="nets">${netBub("Wi-Fi", "Home network", "wifi", "--sky-ink", "--sky-soft", S.wifi, S.isp, "192.168.1.57<br>Router 192.168.1.1")}${netBub("Cellular", "Mobile data", "cell", "--tan-ink", "--tan-soft", S.cell, S.cell, "10.177.42.9")}</div>
+      ${S.routing ? `<div class="bub"><h3>Traffic since start</h3>
+        <div class="row between"><span><span class="pill" style="background:var(--sky);padding:0;width:10px;height:10px"></span> Home devices · Wi-Fi</span><b>↓ ${fmt(t.wd)}</b></div>
+        <div class="row between"><span><span class="pill" style="background:var(--tan);padding:0;width:10px;height:10px"></span> Internet · cellular</span><b>↓ ${fmt(t.cd)}</b></div>
+        <div class="small">${t.n} connections opened · 0 failed</div></div>` : ""}
+      <div class="bub"><h3>Your home services</h3><div class="row">${SERVICES.map((s) => blob(s.icon, s.ink, s.soft, 30)).join("")}<span class="small" style="font-weight:800">5 saved</span></div>
+        <div class="row"><button class="btn" data-tab="services">See services</button><button class="btn line" data-app="protect">Open UniFi Protect</button></div></div>
+      <div class="bub"><h3>Connection tests</h3><div><button class="btn" data-act="tests" ${S.testing ? "disabled" : ""}>${S.testing ? "Testing…" : "Run tests"}</button></div>
+        ${S.tests.map((r) => `<div class="res"><span class="dot" style="background:var(${r.ok === true ? "--mint-soft" : r.ok === false ? "--coral-soft" : "--grape-soft"});color:var(${r.ok === true ? "--mint-ink" : r.ok === false ? "--coral-ink" : "--sub"})">${r.ok === true ? "✓" : r.ok === false ? "✗" : "i"}</span><div><div style="font-weight:700">${esc(r.name)}</div><div class="small">${esc(r.detail)}</div></div></div>`).join("")}</div>`;
+  }
+  function services() {
+    return `<div><p class="t-title">Home services</p><p class="t-sub">Reachable over Wi-Fi even while the internet is down.</p></div>
+      ${SERVICES.map((s) => { const r = route("local", s.byName); return `<div class="bub"><div class="svc">${blob(s.icon, s.ink, s.soft, 40)}<div><h3>${s.name}</h3><div class="small">${s.addr}</div></div></div>
+        ${r.ok ? `<span class="pill p-ok">✓ Reachable · ${8 + s.name.length} ms</span>` : `<span class="pill p-bad">✗ Not reachable</span><div class="small">${esc(r.why)}</div>`}
+        <div class="row"><button class="btn" data-app="${s.key}">Open</button></div></div>`; }).join("")}
+      <div class="bub" style="background:var(--grape-soft)"><h3>Names work too</h3><div class="small" style="color:var(--ink)">homeassistant.local, jellyfin.lan or just “nas” are looked up over your Wi-Fi, so they keep working when the internet is down.</div></div>`;
+  }
+  function sw(key, on, title, sub) {
+    return `<div class="row between" style="flex-wrap:nowrap"><div><div style="font-weight:700">${title}</div><div class="small">${sub}</div></div><button class="sw" role="switch" aria-checked="${on}" aria-label="${esc(title)}" data-sw="${key}"></button></div>`;
+  }
+  const radios = (key, val, opts) => opts.map(([v, t, s]) => `<button class="radio" role="radio" aria-checked="${val === v}" data-radio="${key}" data-val="${v}"><span class="rd"></span><span><b>${t}</b><span>${s}</span></span></button>`).join("");
+  function settings() {
+    const d = S.draft || (S.draft = { ...S.cfg });
+    const bad = d.nvr.trim() && !isIp(d.nvr);
+    const changed = JSON.stringify(d) !== JSON.stringify(S.cfg);
+    return `<div><p class="t-title">Settings</p><p class="t-sub">The defaults suit most homes.</p></div>
+      <div class="bub"><h3>UniFi Protect NVR</h3><div class="field"><label for="nvr">NVR / console IP address</label><input id="nvr" value="${esc(d.nvr)}" inputmode="decimal" autocomplete="off"></div>${bad ? '<div class="small" style="color:var(--coral-ink)">Use an address like 192.168.1.10</div>' : ""}</div>
+      <div class="bub"><h3>Internet traffic</h3>${radios("internetMode", d.internetMode, [["AUTO", "Automatic failover", "Wi-Fi while it works, cellular when it doesn't."], ["ALWAYS_CELLULAR", "Always cellular", "Mobile data for all internet traffic."]])}</div>
+      <div class="bub"><h3>Home traffic handling</h3>${radios("localMode", d.localMode, [["TUNNEL", "Relay through DataRoute", "Works whichever network Android prefers."], ["NATIVE", "Leave to Android", "Faster, only while Wi-Fi stays default."]])}</div>
+      <div class="bub"><h3>Local names</h3>${sw("localNames", d.localNames, "Find home devices by name", "homeassistant.local, nas.lan and your router's names.")}</div>
+      <button class="btn big" data-act="save" ${bad || !changed ? "disabled" : ""}>${S.routing ? "Save and apply" : "Save"}</button>`;
+  }
+  function logView() {
+    const cls = (l) => l.includes("failed") ? "x" : l.includes("WIFI") || l.includes("MDNS") || l.includes("WIFI_DNS") ? "w" : l.includes("CELLULAR") ? "c" : "";
+    return `<div class="row between"><div><p class="t-title">Log</p><p class="t-sub">Newest first.</p></div><button class="btn line" data-act="clearlog">Clear</button></div>
+      <div class="bub"><div class="log">${S.log.slice().reverse().map((l) => `<span class="${cls(l)}">${esc(l)}</span>`).join("\n") || '<span class="small">Nothing yet. Start routing and open an app.</span>'}</div></div>`;
+  }
+  function render() {
+    statusIcons();
+    $("content").innerHTML = { home, services, settings, log: logView }[S.tab]();
+    $("nav").innerHTML = [["home", "home", "Home"], ["services", "apps", "Services"], ["settings", "tune", "Settings"], ["log", "list", "Log"]]
+      .map(([k, ic, l]) => `<button class="navi" data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ""}><span class="pi">${svg(ic)}</span>${l}</button>`).join("");
+    renderToggles(); drawDiagram();
+  }
+
+  // ---------- actions ----------
+  const addLog = (m) => { S.log.push(`${now()}  ${m}`); if (S.log.length > 200) S.log.shift(); };
+  function toggleRouting() {
+    if (S.routing || S.starting) { S.routing = S.starting = false; addLog("Tunnel stopped"); render(); return; }
+    S.starting = true; render();
+    setTimeout(() => {
+      if (!S.starting) return;
+      S.starting = false; S.routing = true; S.traffic = { wd: 0, wu: 0, cd: 0, cu: 0, n: 0 };
+      addLog(`Tunnel up: home → Wi-Fi, internet → ${viaWifi() ? "Wi-Fi" : "cellular"}`); render();
+    }, 900);
+  }
+  function runTests() {
+    S.testing = true; S.tests = []; render();
+    setTimeout(() => {
+      const out = [];
+      out.push(S.wifi ? { name: "NVR 192.168.1.10 via Wi-Fi", ok: true, detail: "Reachable · 6 ms" } : { name: "NVR 192.168.1.10 via Wi-Fi", ok: false, detail: "Wi-Fi is not connected" });
+      out.push(S.cell ? { name: "Internet via cellular", ok: true, detail: "48 ms" } : { name: "Internet via cellular", ok: false, detail: "Mobile data is off" });
+      out.push(!S.wifi ? { name: "Internet via Wi-Fi", ok: false, detail: "Not connected" } : S.isp ? { name: "Internet via Wi-Fi", ok: true, detail: "21 ms" } : { name: "Internet via Wi-Fi", ok: false, detail: "No answer: the ISP is down" });
+      if (S.routing) {
+        const l = route("local"), n = route("internet");
+        out.push({ name: "Home devices through DataRoute", ok: l.ok, detail: l.ok ? "Reachable · 9 ms" : l.why });
+        out.push({ name: "Internet through tunnel", ok: n.ok, detail: n.ok ? (n.path === "cell" ? "51 ms over cellular" : "23 ms over Wi-Fi") : n.why });
+      }
+      S.tests = out; S.testing = false; render();
+    }, 1200);
+  }
+
+  function openApp(key) {
+    const svc = SERVICES.find((s) => s.key === key), net = NET_APPS.find((a) => a.key === key);
+    const kind = svc ? "local" : "internet";
+    const r = route(kind, svc && svc.byName);
+    S.app = key;
+    if (S.routing) {
+      if (svc && svc.byName && r.ok) addLog(`DNS ${svc.addr.split(":")[0]} answered via ${svc.addr.includes(".local") ? "MDNS" : "WIFI_DNS"}`);
+      const target = svc ? (svc.ip || svc.addr.split(":")[0]) + ":" + svc.addr.split(":")[1] : net.ip + ":443";
+      if (r.ok) {
+        addLog(`TCP ${target} via ${r.path === "wifi" ? "WIFI" : "CELLULAR"} connected`);
+        const b = svc ? BYTES[key] : net.bytes;
+        if (r.path === "wifi") S.traffic.wd += b; else S.traffic.cd += b;
+        S.traffic.n++;
+      } else addLog(`TCP ${target} failed: ${r.why}`);
+    }
+    showOverlay(key, r); setVerdict(svc ? svc.name : net.name, r, kind); render(); animate(r, kind);
+  }
+  function showOverlay(key, r) {
+    const svc = SERVICES.find((s) => s.key === key), net = NET_APPS.find((a) => a.key === key);
+    const name = svc ? svc.name : net.name;
+    const via = r.path === "cell" ? "cellular" : "Wi-Fi";
+    let body = "", dark = false;
+    if (!r.ok) body = `<div class="fail">${svc ? `Can't reach ${esc(svc.addr)}` : "No connection"}<br><span style="font-weight:400">${esc(r.why)}.</span></div>`;
+    else if (key === "protect") { dark = true; body = `<div class="grid2">${["Front door", "Driveway", "Garage", "Back yard"].map((n) => `<div class="cam"><canvas width="160" height="90"></canvas><span class="lv">LIVE</span><span class="nm">${n}</span></div>`).join("")}</div><div class="small" style="color:#bdb8d8">Live over Wi-Fi from your NVR.</div>`; }
+    else if (key === "ha") body = `<div class="grid2"><div class="tile on">Living room<b>Lights on</b></div><div class="tile">Thermostat<b>21.5°</b></div><div class="tile">Front door<b>Locked</b></div><div class="tile on">Garage<b>Closed</b></div></div><span class="pill p-ok">Found homeassistant.local over Wi-Fi</span>`;
+    else if (key === "plex" || key === "jellyfin") { dark = true; const cols = ["#6c5ce7,#ff6fb5", "#2d8cff,#12b886", "#ff8a3d,#ffc53d", "#e5484d,#6c5ce7", "#12b886,#2d8cff", "#ffc53d,#ff6fb5"]; body = `<div style="font-weight:800">Continue watching</div><div class="grid3">${["Night Shift", "Blue Coast", "Ember", "Orbit", "Tidewater", "Paper Moon"].map((t, i) => `<div class="poster" style="background:linear-gradient(160deg,${cols[i]})">${t}</div>`).join("")}</div><div class="prog"><i></i></div><div class="small" style="color:#bdb8d8">Streaming from your server over Wi-Fi. No mobile data used.</div>`; }
+    else if (key === "nas") body = `<div class="tile" style="background:var(--tan-soft)">Storage<b>6.2 TB of 10 TB</b><div class="bar-s"><i></i></div></div>${["Photos", "Documents", "Backups", "Movies"].map((f) => `<div class="row" style="background:var(--bg);border-radius:14px;padding:8px 12px">${blob("nas", "--tan-ink", "--tan-soft", 26)}<b>${f}</b></div>`).join("")}`;
+    else if (key === "video") { dark = true; body = `<div class="cam"><canvas width="320" height="180"></canvas></div><div class="prog"><i></i></div><div class="small" style="color:#bdb8d8">Playing in HD over ${via}.</div>`; }
+    else if (key === "claude") body = `<div class="bubble me">Is my NVR still recording while the ISP is down?</div><div class="bubble">Yes. UniFi Protect records to its own drive whether or not the internet is up; only remote access needs the WAN.</div><div class="small">Answered over ${via}.</div>`;
+    else body = `<div class="bubble me">Cameras are fine, I'm on cell data now.</div><div class="small" style="align-self:flex-end">Sent · RCS over ${via}</div>`;
+    const o = $("overlay");
+    o.className = "overlay" + (dark ? " dark" : "");
+    o.innerHTML = `<div class="bar"><button class="back" data-act="closeapp">‹ Back</button>${name}</div><div class="body">${body}</div>`;
+    o.hidden = false; startNoise();
+  }
+  function setVerdict(name, r, kind) {
+    const where = r.path === "wifi" ? '<b style="color:var(--sky-ink)">Wi-Fi</b>' : r.path === "cell" ? '<b style="color:var(--tan-ink)">cellular</b>' : "no network";
+    $("verdict").innerHTML = r.ok
+      ? `<span style="color:var(--mint-ink)">✓ ${esc(name)} works.</span> It went over ${where}${S.routing ? ", chosen by DataRoute." : ", Android's default network."}`
+      : `<span style="color:var(--coral-ink)">✗ ${esc(name)} doesn't work.</span> ${esc(r.why)}.${S.routing ? "" : " Turn on DataRoute to fix it."}`;
+  }
+
+  // ---------- diagram ----------
+  const D = { phone: [80, 120], wifi: [320, 60], cell: [320, 180], home: [555, 60], net: [555, 180] };
+  function drawDiagram() {
+    const node = (x, y, label, sub, fill, on) => `<g><rect x="${x - 66}" y="${y - 30}" width="132" height="60" rx="30" fill="${on ? fill : "#f0eef9"}"/><text x="${x}" y="${y - 3}" text-anchor="middle" fill="${on ? "#23213a" : "#8d89a8"}" font-family="Fredoka, sans-serif" font-weight="600" font-size="16">${label}</text><text x="${x}" y="${y + 16}" text-anchor="middle" fill="#625f7d" font-family="Nunito, sans-serif" font-weight="700" font-size="11">${sub}</text></g>`;
+    const link = (a, b, color, on) => `<line x1="${a[0] + 66}" y1="${a[1]}" x2="${b[0] - 66}" y2="${b[1]}" stroke="${on ? color : "#d7d2f0"}" stroke-width="5" stroke-linecap="round" stroke-dasharray="${on ? "0" : "2 10"}"/>`;
+    $("diagram").innerHTML =
+      link(D.phone, D.wifi, "#2d8cff", S.wifi) + link(D.phone, D.cell, "#ff8a3d", S.cell) + link(D.wifi, D.home, "#2d8cff", S.wifi) +
+      link(D.wifi, D.net, "#2d8cff", S.wifi && S.isp) + link(D.cell, D.net, "#ff8a3d", S.cell) +
+      (S.wifi && !S.isp ? `<g><rect x="400" y="106" width="86" height="26" rx="13" fill="#ffe3e3"/><text x="443" y="124" text-anchor="middle" fill="#c0262c" font-family="Nunito, sans-serif" font-weight="800" font-size="12">ISP down</text></g>` : "") +
+      node(...D.phone, "Phone", S.routing ? "DataRoute on" : "DataRoute off", "#ece9ff", true) +
+      node(...D.wifi, "Wi-Fi", S.wifi ? (S.isp ? "online" : "no internet") : "off", "#e0eeff", S.wifi) +
+      node(...D.cell, "Cellular", S.cell ? "5G" : "off", "#ffebdd", S.cell) +
+      node(...D.home, "Home", "NAS · Plex · cameras", "#d9f7ec", S.wifi) +
+      node(...D.net, "Internet", "video · Claude · chat", "#fff4d6", true) + '<g id="pk"></g>';
+  }
+  let pkTimer = 0;
+  function animate(r, kind) {
+    const g = $("pk"); if (!g) return; clearInterval(pkTimer);
+    const pts = r.path === "wifi" ? [D.phone, D.wifi, kind === "local" ? D.home : D.net] : r.path === "cell" ? [D.phone, D.cell, D.net] : [D.phone, D.phone, D.phone];
+    const color = !r.ok ? "#e5484d" : r.path === "wifi" ? "#2d8cff" : "#ff8a3d";
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) { g.innerHTML = `<circle cx="${pts[2][0]}" cy="${pts[2][1] + 42}" r="8" fill="${color}"/>`; return; }
+    let t = 0;
+    pkTimer = setInterval(() => {
+      t = (t + 0.02) % 1;
+      const seg = t < 0.5 ? 0 : 1, lt = (t % 0.5) * 2, a = pts[seg], b = pts[seg + 1];
+      const stop = !r.ok && seg === 1 && lt > 0.5, k = stop ? 0.5 : lt;
+      const x = a[0] + (b[0] - a[0]) * k, y = a[1] + (b[1] - a[1]) * k;
+      g.innerHTML = `<circle cx="${x}" cy="${y}" r="9" fill="${color}" stroke="#fff" stroke-width="3"/>` + (stop ? `<text x="${x}" y="${y - 16}" text-anchor="middle" fill="#c0262c" font-family="Nunito, sans-serif" font-weight="800" font-size="14">✗</text>` : "");
+    }, 40);
+  }
+
+  let raf = 0;
+  function startNoise() {
+    cancelAnimationFrame(raf);
+    const cv = [...document.querySelectorAll("#overlay canvas")]; if (!cv.length) return;
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches; let f = 0;
+    const draw = () => {
+      cv.forEach((c, i) => {
+        const x = c.getContext("2d"), w = c.width, h = c.height, gr = x.createLinearGradient(0, 0, w, h);
+        gr.addColorStop(0, ["#3b4a63", "#3d5a4c", "#4a3d63", "#2f4f5a"][i % 4]); gr.addColorStop(1, "#151420");
+        x.fillStyle = gr; x.fillRect(0, 0, w, h);
+        x.fillStyle = "rgba(255,255,255,.06)"; x.fillRect(0, h * .62, w, h * .38);
+        x.fillStyle = "rgba(255,255,255,.22)"; x.fillRect(w * .15 + (f * (.6 + i * .3)) % (w * .7), h * .42, w * .05, h * .26);
+        x.fillStyle = "rgba(255,255,255,.8)"; x.font = "9px monospace"; x.fillText(new Date().toTimeString().slice(0, 8), 5, 12);
+      });
+      f++; if (!still && !$("overlay").hidden) raf = requestAnimationFrame(draw);
+    };
+    draw();
+  }
+
+  function renderToggles() {
+    const t = [["wifi", "Home Wi-Fi", S.wifi ? "Connected" : "Off"], ["isp", "Home internet", S.isp ? "Working" : "Down"], ["cell", "Mobile data", S.cell ? "On" : "Off"]];
+    $("toggles").innerHTML = t.map(([k, l, s]) => `<button class="tg ${S[k] ? "on" : "off"}" type="button" aria-pressed="${S[k]}" data-tg="${k}">${l}<small>${S[k] ? "✓" : "✗"} ${s} · tap to change</small></button>`).join("");
+    $("scnote").textContent = !S.wifi ? "You're away from home: home devices are only reachable through their own cloud access, which needs your home internet."
+      : !S.isp ? "This is the moment DataRoute is for: your home network still works, but its internet is down."
+      : "Everything is healthy. In Automatic mode DataRoute keeps internet on Wi-Fi, so it uses no mobile data.";
+  }
+  const appBtn = (k, name, sub, icon, ink, soft) => `<button class="app" type="button" data-app="${k}">${blob(icon, ink, soft, 38)}<span>${name}<small>${sub}</small></span></button>`;
+  $("apps-home").innerHTML = SERVICES.map((s) => appBtn(s.key, s.name, s.addr.split(":")[0], s.icon, s.ink, s.soft)).join("");
+  $("apps-net").innerHTML = NET_APPS.map((a) => appBtn(a.key, a.name, a.sub, a.icon, a.ink, a.soft)).join("");
+
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-act],[data-tab],[data-tg],[data-app],[data-sw],[data-radio]"); if (!el) return;
+    if (el.dataset.tab) { S.tab = el.dataset.tab; if (S.tab === "settings") S.draft = { ...S.cfg }; $("overlay").hidden = true; S.app = null; render(); return; }
+    if (el.dataset.tg) { const k = el.dataset.tg; S[k] = !S[k]; if (S.routing) addLog(`Network changed: Wi-Fi ${S.wifi ? (S.isp ? "online" : "no internet") : "off"}, cellular ${S.cell ? "on" : "off"}`); if (S.app) openApp(S.app); else render(); return; }
+    if (el.dataset.app) { openApp(el.dataset.app); return; }
+    if (el.dataset.sw) { S.draft[el.dataset.sw] = !S.draft[el.dataset.sw]; render(); return; }
+    if (el.dataset.radio) { S.draft[el.dataset.radio] = el.dataset.val; render(); return; }
+    const a = el.dataset.act;
+    if (a === "toggle") toggleRouting();
+    else if (a === "tests") runTests();
+    else if (a === "save") { S.cfg = { ...S.draft }; addLog("Settings saved" + (S.routing ? ", tunnel rebuilt" : "")); render(); }
+    else if (a === "clearlog") { S.log = []; render(); }
+    else if (a === "closeapp") { $("overlay").hidden = true; S.app = null; cancelAnimationFrame(raf); }
+  });
+  document.addEventListener("input", (e) => { if (e.target.id === "nvr") { S.draft.nvr = e.target.value; const p = e.target.selectionStart; render(); const n = $("nvr"); n.focus(); n.setSelectionRange(p, p); } });
+
+  let touring = false;
+  $("tour").addEventListener("click", async () => {
+    if (touring) return; touring = true; $("tour").disabled = true;
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const close = () => { $("overlay").hidden = true; S.app = null; render(); };
+    const steps = [
+      () => { Object.assign(S, { wifi: true, isp: false, cell: true, routing: false, starting: false, tab: "home", tests: [] }); close(); },
+      () => openApp("protect"), () => openApp("video"), close, toggleRouting, () => {},
+      () => openApp("protect"), () => openApp("plex"), () => openApp("ha"), () => openApp("video"), () => openApp("claude"),
+      () => { close(); S.tab = "services"; render(); }, () => { S.tab = "log"; render(); }, () => { S.tab = "home"; render(); },
+    ];
+    for (const s of steps) { s(); await wait(2200); }
+    touring = false; $("tour").disabled = false;
+  });
+
+  setInterval(() => { const d = new Date(); $("clock").textContent = d.getHours() + ":" + String(d.getMinutes()).padStart(2, "0"); }, 10000);
+  render();
+})();
+</script>
+
+</body>
+</html>
