@@ -58,6 +58,21 @@ class SplitRoutingTest {
         assertTrue(EventLog.lines.value.any { it.contains(":80 via CELLULAR connected") })
     }
 
+    /** A name from the "My names" list resolves inside the tunnel and is reached over Wi-Fi. */
+    @Test fun localNameResolvesThroughTheTunnel() {
+        val ip = wifiIp()
+        assumeTrue("emulator has no Wi-Fi network", ip != null)
+        Prefs(ctx).save(Config(nvrHost = ip!!, localHosts = "fakenvr = $ip"))
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        RouteVpnService.start(ctx)
+        assertTrue("tunnel came up", waitFor(20_000) { VpnStatus.state.value == VpnState.RUNNING })
+
+        val (code, body) = httpGet("http://fakenvr:$FAKE_NVR_PORT/")
+        assertEquals(200, code)
+        assertEquals("NVR-OK", body)
+        assertTrue(EventLog.lines.value.any { it.contains("DNS fakenvr answered via HOSTS") })
+    }
+
     @Test fun stopsCleanly() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         RouteVpnService.start(ctx)

@@ -37,7 +37,7 @@
         </activity>
 
         <activity
-            android:name=".NvrActivity"
+            android:name=".WebViewerActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:label="@string/nvr_title" />

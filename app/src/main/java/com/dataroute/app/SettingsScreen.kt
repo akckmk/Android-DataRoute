@@ -18,6 +18,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +26,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -49,12 +51,13 @@ fun SettingsScreen(vm: MainViewModel) {
     val errors = draft.errors()
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Settings", style = MaterialTheme.typography.headlineMedium)
+        ScreenTitle("Settings", "The defaults suit most homes. Add your NVR and you're set.")
 
-        SectionCard("UniFi Protect NVR") {
+        Bubble {
+            BubbleTitle("UniFi Protect NVR")
             OutlinedTextField(
                 value = draft.nvrHost,
                 onValueChange = { draft = draft.copy(nvrHost = it) },
@@ -62,16 +65,18 @@ fun SettingsScreen(vm: MainViewModel) {
                 placeholder = { Text("192.168.1.10") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth(),
             )
             SwitchRow(
-                "Accept the NVR's self-signed certificate",
-                "Only in the built-in viewer and only for this address.",
+                "Trust my home devices' certificates",
+                "In the built-in viewer only, and only for local addresses (NVR, NAS, Home Assistant…).",
                 draft.acceptNvrCert,
             ) { draft = draft.copy(acceptNvrCert = it) }
         }
 
-        SectionCard("What counts as local (sent over Wi-Fi)") {
+        Bubble {
+            BubbleTitle("What stays on Wi-Fi")
             SwitchRow(
                 "All private ranges",
                 "10.x.x.x, 172.16–31.x.x and 192.168.x.x. Covers cameras on other VLANs.",
@@ -87,11 +92,13 @@ fun SettingsScreen(vm: MainViewModel) {
                 onValueChange = { draft = draft.copy(extraLocal = it) },
                 label = { Text("Extra local subnets (optional)") },
                 placeholder = { Text("100.64.0.0/10, 203.0.113.5") },
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth(),
             )
         }
 
-        SectionCard("Internet traffic") {
+        Bubble {
+            BubbleTitle("Internet traffic")
             RadioGroup(
                 listOf(
                     Triple(InternetMode.AUTO, "Automatic failover", "Use Wi-Fi while it has working internet, switch to cellular when it doesn't."),
@@ -101,17 +108,46 @@ fun SettingsScreen(vm: MainViewModel) {
             ) { draft = draft.copy(internetMode = it) }
         }
 
-        SectionCard("Local traffic handling") {
+        Bubble {
+            BubbleTitle("Home traffic handling")
             RadioGroup(
                 listOf(
-                    Triple(LocalMode.TUNNEL, "Relay through DataRoute (reliable)", "Works no matter which network Android prefers. Camera video passes through this app."),
-                    Triple(LocalMode.NATIVE, "Leave to Android (faster)", "Local traffic bypasses the tunnel. Only works while Android keeps Wi-Fi as its default network."),
+                    Triple(LocalMode.TUNNEL, "Relay through DataRoute (reliable)", "Works no matter which network Android prefers. Video from cameras, Plex and Jellyfin passes through this app."),
+                    Triple(LocalMode.NATIVE, "Leave to Android (faster)", "Home traffic skips DataRoute. Only works while Android keeps Wi-Fi as its default network."),
                 ),
                 draft.localMode,
             ) { draft = draft.copy(localMode = it) }
         }
 
-        SectionCard("DNS") {
+        Bubble {
+            BubbleTitle("Local names")
+            SwitchRow(
+                "Find home devices by name",
+                "homeassistant.local, nas.lan and your router's names are looked up over Wi-Fi.",
+                draft.localNames,
+            ) { draft = draft.copy(localNames = it) }
+            OutlinedTextField(
+                value = draft.localHosts,
+                onValueChange = { draft = draft.copy(localHosts = it) },
+                label = { Text("My names (optional)") },
+                placeholder = { Text("nas = 192.168.1.20\nplex = 192.168.1.30") },
+                minLines = 2,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = draft.localDomains,
+                onValueChange = { draft = draft.copy(localDomains = it) },
+                label = { Text("Extra home domains (optional)") },
+                placeholder = { Text("myhome.net") },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        Bubble {
+            BubbleTitle("DNS")
             SwitchRow("Use the carrier's DNS", "Looked up from the cellular connection.", draft.useCarrierDns) {
                 draft = draft.copy(useCarrierDns = it)
             }
@@ -121,18 +157,20 @@ fun SettingsScreen(vm: MainViewModel) {
                     onValueChange = { draft = draft.copy(customDns = it) },
                     label = { Text("DNS servers") },
                     singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
 
-        SectionCard("Apps that bypass the tunnel") {
+        Bubble {
+            BubbleTitle("Apps that bypass DataRoute")
             Text(
                 if (draft.bypassApps.isEmpty()) "None. Every app is routed. Add apps that refuse to work behind a VPN (banking apps, for example)."
                 else "${draft.bypassApps.size} app(s) bypass DataRoute and use Android's default network.",
                 style = MaterialTheme.typography.bodyMedium,
             )
-            OutlinedButton(onClick = { picking = true }) { Text("Choose apps") }
+            OutlinedButton(onClick = { picking = true }, shape = RoundedCornerShape(50)) { Text("Choose apps") }
         }
 
         errors.forEach { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
@@ -140,6 +178,8 @@ fun SettingsScreen(vm: MainViewModel) {
             onClick = { vm.save(draft) },
             enabled = errors.isEmpty() && draft != saved,
             modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(50),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 16.dp),
         ) { Text(if (state != VpnState.STOPPED) "Save and apply" else "Save") }
     }
 
@@ -155,11 +195,14 @@ fun SettingsScreen(vm: MainViewModel) {
 private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall)
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = DR.Ink)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = DR.Sub)
         }
         Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(
+            checked = checked, onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(checkedTrackColor = DR.Grape, checkedThumbColor = androidx.compose.ui.graphics.Color.White),
+        )
     }
 }
 
@@ -173,8 +216,8 @@ private fun <T> RadioGroup(options: List<Triple<T, String, String>>, selected: T
             RadioButton(selected = value == selected, onClick = null)
             Spacer(Modifier.width(12.dp))
             Column {
-                Text(title, style = MaterialTheme.typography.bodyLarge)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall)
+                Text(title, style = MaterialTheme.typography.bodyLarge, color = DR.Ink)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = DR.Sub)
             }
         }
     }
@@ -188,7 +231,8 @@ private fun AppPickerDialog(vm: MainViewModel, selected: Set<String>, onDismiss:
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Apps that bypass the tunnel") },
+        containerColor = DR.Bg,
+        title = { Text("Apps that bypass DataRoute", style = MaterialTheme.typography.headlineSmall) },
         text = {
             val list = apps
             if (list == null) {

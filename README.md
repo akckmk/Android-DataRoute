@@ -32,6 +32,22 @@ re-originates every connection on the *right physical network*:
 Each socket is `protect()`ed (so it can't loop back into the tunnel) and `bindSocket()`ed to the Wi-Fi or cellular
 `Network`, which is what makes the split independent of Android's "default network" choice.
 
+## Your home services
+
+Everything on your home network keeps working while the internet is down: **UniFi Protect, Home Assistant,
+Plex, Jellyfin, a NAS (Synology, QNAP, TrueNAS, Unraid), Pi-hole, Frigate, Nextcloud, printers…**
+
+* **By address** (`192.168.1.20:8123`, any TCP/UDP port): routed over Wi-Fi.
+* **By name**: the carrier's DNS can't know your home's names, so DataRoute answers them itself, over Wi-Fi:
+  * `*.local` (e.g. `homeassistant.local`, `synology.local`) via multicast DNS,
+  * single words and home domains (`nas`, `nas.lan`, `plex.home`, `*.internal`, `*.home.arpa`, the router's
+    own domain) via your router's DNS,
+  * your own list under **Settings → Local names** (`nas = 192.168.1.20`).
+* **Services tab**: save each service once (presets fill in the usual port), see whether it's reachable, and open
+  it in the built-in viewer or its own app.
+* Apps that *discover* servers by broadcast (some Jellyfin/Plex/Chromecast flows) may not find them when Android
+  has switched its default to cellular; enter the server's address or name instead.
+
 ## Using it
 
 1. Install the APK (from the **Actions → Android CI → DataRoute-debug-apk** artifact, or build it yourself).
@@ -57,7 +73,8 @@ Each socket is `protect()`ed (so it can't loop back into the tunnel) and `bindSo
 
 * **One VPN at a time** on Android. DataRoute can't run together with another VPN (Tailscale, WireGuard, …).
 * **IPv4 only.** IPv6 isn't routed into the tunnel, so apps fall back to IPv4 (fine in practice).
-* ICMP (`ping`) and fragmented packets aren't forwarded; mDNS/`.local` names aren't relayed – use IP addresses.
+* ICMP (`ping`) and fragmented packets aren't forwarded. Broadcast/multicast *discovery* isn't relayed (names are).
+* If you set Android's **Private DNS** to a specific provider, local names can't be answered; leave it on Automatic.
 * Camera video in *Relay* mode passes through user-space code. It's tested to multi-MB/s on the JVM, but
   many simultaneous 4K streams on a weak phone may be better served by *Leave to Android* when Wi-Fi is the default.
 * Holding the mobile-data connection up while on Wi-Fi costs some battery.
@@ -72,4 +89,7 @@ Each socket is `protect()`ed (so it can't loop back into the tunnel) and `bindSo
 ./gradlew :app:assembleDebug    # needs the Android SDK; APK in app/build/outputs/apk/debug/
 ```
 
-Requires JDK 17 and the Android SDK (platform 35). CI does both on every push.
+Requires JDK 17 and the Android SDK (platform 35). CI does both on every push, then runs the instrumented tests
+on an Android 16 emulator sized like a Galaxy S26 Ultra and commits its screenshots to `docs/screenshots/`.
+
+Fonts: Fredoka and Nunito, SIL Open Font License 1.1 (`licenses/`).

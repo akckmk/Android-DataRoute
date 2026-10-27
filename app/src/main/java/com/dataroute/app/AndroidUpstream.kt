@@ -62,6 +62,20 @@ class AndroidUpstream(private val vpn: VpnService) : Upstream {
         }
     }
 
+    override fun openUdpRaw(path: Path): DatagramSocket {
+        val network = networkFor(path)
+        val sock = DatagramSocket(null as SocketAddress?)
+        try {
+            if (!vpn.protect(sock)) throw IOException("protect() failed")
+            network.bindSocket(sock)
+            sock.bind(InetSocketAddress(0))
+            return sock
+        } catch (e: Exception) {
+            runCatching { sock.close() }
+            throw if (e is IOException) e else IOException(e.message, e)
+        }
+    }
+
     private companion object {
         const val CONNECT_TIMEOUT_MS = 8000
     }

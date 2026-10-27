@@ -17,10 +17,12 @@ import androidx.core.content.ContextCompat
 import com.dataroute.core.Cidr
 import com.dataroute.core.ForwardEngine
 import com.dataroute.core.Ip
+import com.dataroute.core.LocalDns
 import com.dataroute.core.LocalNets
 import com.dataroute.core.PacketSink
 import com.dataroute.core.RoutePolicy
 import com.dataroute.core.Router
+import com.dataroute.core.UpstreamDnsTransport
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
@@ -70,6 +72,7 @@ class RouteVpnService : VpnService() {
 
     @Volatile private var policy = RoutePolicy(emptyList())
     @Volatile private var dnsServers: List<Int> = emptyList()
+    @Volatile private var localDnsSettings = LocalDns.Settings()
 
     /** What the tunnel was built from; if the network drifts from this we rebuild it. */
     private var builtSubnet: Cidr? = null
@@ -131,6 +134,7 @@ class RouteVpnService : VpnService() {
             builtSubnet = snap.wifi.subnet
             builtCarrierDns = snap.cellular.dns
             policy = makePolicy(cfg, snap)
+            localDnsSettings = makeLocalDnsSettings(cfg, snap)
 
             val builder = Builder()
                 .setSession("DataRoute")
@@ -144,6 +148,8 @@ class RouteVpnService : VpnService() {
                 try { builder.addDisallowedApplication(pkg) } catch (_: Exception) { /* app was uninstalled */ }
             }
             underlyingFor(snap)?.let { builder.setUnderlyingNetworks(arrayOf(it)) }
+            // lets "nas" resolve as "nas.<home domain>" the way it does on the home network
+            if (cfg.localNames) for (d in snap.wifi.domains) runCatching { builder.addSearchDomain(d) }
 
             val pfd: ParcelFileDescriptor? = try {
                 builder.establish()
@@ -157,7 +163,9 @@ class RouteVpnService : VpnService() {
             val sink = PacketSink { pkt ->
                 try { synchronized(out) { out.write(pkt) } } catch (_: IOException) { /* tunnel is closing */ }
             }
-            val eng = ForwardEngine(sink, AndroidUpstream(this), Router { policy.pathFor(it) }, EventLog::add)
+            val upstream = AndroidUpstream(this)
+            val localDns = if (cfg.localNames) LocalDns({ localDnsSettings }, UpstreamDnsTransport(upstream)) else null
+            val eng = ForwardEngine(sink, upstream, Router { policy.pathFor(it) }, EventLog::add, localDns)
             engine = eng
 
             thread(name = "dr-tun", isDaemon = true) {
@@ -220,6 +228,12 @@ class RouteVpnService : VpnService() {
         return RoutePolicy(local, forced, internetViaWifi = cfg.internetMode == InternetMode.AUTO && snap.wifi.validated)
     }
 
+    private fun makeLocalDnsSettings(cfg: Config, snap: NetSnapshot) = LocalDns.Settings(
+        hosts = LocalDns.parseHosts(cfg.localHosts).first,
+        localSuffixes = (LocalDns.DEFAULT_SUFFIXES + LocalDns.parseSuffixes(cfg.localDomains) + snap.wifi.domains).distinct(),
+        wifiDns = snap.wifi.dns,
+    )
+
     private fun pickDns(cfg: Config, snap: NetSnapshot, bypassingTunnel: List<Cidr>): List<Int> {
         val wanted = if (cfg.useCarrierDns) snap.cellular.dns else LocalNets.parseDns(cfg.customDns).first
         // A DNS server inside an excluded range would be queried over the default network, not the tunnel.
@@ -233,6 +247,7 @@ class RouteVpnService : VpnService() {
     private fun onNetworkChanged(snap: NetSnapshot) {
         val cfg = config
         policy = makePolicy(cfg, snap)
+        localDnsSettings = makeLocalDnsSettings(cfg, snap)
         underlyingFor(snap)?.let { runCatching { setUnderlyingNetworks(arrayOf(it)) } }
 
         val subnetDrift = cfg.localMode == LocalMode.NATIVE && snap.wifi.subnet != builtSubnet

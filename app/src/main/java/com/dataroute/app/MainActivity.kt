@@ -18,8 +18,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -29,7 +31,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -41,7 +45,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             DataRouteTheme {
-                Surface(Modifier.fillMaxSize()) { Root(vm) }
+                Surface(Modifier.fillMaxSize(), color = DR.Bg) { Root(vm) }
             }
         }
     }
@@ -77,14 +81,24 @@ private fun Root(vm: MainViewModel) {
     }
 
     Scaffold(
+        containerColor = DR.Bg,
         bottomBar = {
-            NavigationBar {
-                listOf("Status" to "◉", "Settings" to "⚙", "Log" to "☰").forEachIndexed { i, (label, glyph) ->
+            NavigationBar(containerColor = DR.Card, tonalElevation = 0.dp) {
+                listOf(
+                    "Home" to R.drawable.ic_home,
+                    "Services" to R.drawable.ic_apps,
+                    "Settings" to R.drawable.ic_tune,
+                    "Log" to R.drawable.ic_list,
+                ).forEachIndexed { i, (label, icon) ->
                     NavigationBarItem(
                         selected = tab == i,
                         onClick = { tab = i },
-                        icon = { Text(glyph) },
+                        icon = { Icon(painterResource(icon), null) },
                         label = { Text(label) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = DR.GrapeInk, selectedTextColor = DR.GrapeInk,
+                            indicatorColor = DR.GrapeSoft, unselectedIconColor = DR.Sub, unselectedTextColor = DR.Sub,
+                        ),
                     )
                 }
             }
@@ -92,8 +106,9 @@ private fun Root(vm: MainViewModel) {
     ) { padding ->
         Box(Modifier.padding(padding)) {
             when (tab) {
-                0 -> StatusScreen(vm, onToggle)
-                1 -> SettingsScreen(vm)
+                0 -> HomeScreen(vm, onToggle, onOpenServices = { tab = 1 })
+                1 -> ServicesScreen(vm)
+                2 -> SettingsScreen(vm)
                 else -> LogScreen(vm)
             }
         }

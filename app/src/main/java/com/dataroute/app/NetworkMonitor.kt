@@ -21,6 +21,8 @@ data class NetInfo(
     val gateway: String? = null,
     /** IPv4 DNS servers handed out by this network. */
     val dns: List<Int> = emptyList(),
+    /** Search domains handed out by this network (e.g. the UniFi gateway's domain name). */
+    val domains: List<String> = emptyList(),
 ) {
     val connected: Boolean get() = network != null
 }
@@ -110,6 +112,7 @@ object NetworkMonitor {
                     subnet = v4?.let { a -> Cidr.of(Ip.fromBytes(a.address.address), a.prefixLength) },
                     gateway = gw,
                     dns = dns,
+                    domains = lp.domains?.split(' ', ',')?.map { d -> d.trim().trim('.').lowercase() }?.filter { d -> d.isNotEmpty() } ?: emptyList(),
                 )
             }
         }

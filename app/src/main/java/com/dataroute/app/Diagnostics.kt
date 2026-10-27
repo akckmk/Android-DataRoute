@@ -6,7 +6,9 @@ import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.net.URL
+import java.net.UnknownHostException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -33,7 +35,35 @@ object Diagnostics {
         out += http("Internet via cellular (direct)", snap.cellular.network, snap.cellular.connected)
         out += http("Internet via Wi-Fi (direct)", snap.wifi.network, snap.wifi.connected)
         if (tunnelUp) out += http("Internet through tunnel", null, true)
+        for (svc in cfg.services) out += probeBlocking(svc, snap, tunnelUp).copy(name = "${svc.name} (${svc.address})")
         out
+    }
+
+    /** Is this home service answering? Through the tunnel when it's up (as apps see it), else straight over Wi-Fi. */
+    suspend fun probe(svc: HomeService, snap: NetSnapshot, tunnelUp: Boolean): TestResult =
+        withContext(Dispatchers.IO) { probeBlocking(svc, snap, tunnelUp) }
+
+    private fun probeBlocking(svc: HomeService, snap: NetSnapshot, tunnelUp: Boolean): TestResult {
+        val network = if (tunnelUp) null else snap.wifi.network
+        val t0 = System.nanoTime()
+        val s = Socket()
+        return try {
+            network?.bindSocket(s)
+            val addr = network?.getByName(svc.host) ?: InetAddress.getByName(svc.host)
+            s.connect(InetSocketAddress(addr, svc.port), 3000)
+            TestResult(svc.name, true, "Reachable · ${(System.nanoTime() - t0) / 1_000_000} ms")
+        } catch (e: UnknownHostException) {
+            TestResult(svc.name, false, "Can't find \u201c${svc.host}\u201d. Use its IP address, or add it under Settings → Local names.")
+        } catch (e: java.net.ConnectException) {
+            if (e.message?.contains("refused", ignoreCase = true) == true) TestResult(svc.name, false, "The device answered, but nothing is listening on port ${svc.port}.")
+            else TestResult(svc.name, false, e.message ?: "Couldn't connect")
+        } catch (e: SocketTimeoutException) {
+            TestResult(svc.name, false, "No answer from ${svc.address}. Is it on, and is the phone on your home Wi-Fi?")
+        } catch (e: Exception) {
+            TestResult(svc.name, false, e.message ?: e.javaClass.simpleName)
+        } finally {
+            runCatching { s.close() }
+        }
     }
 
     /** Tries the usual NVR ports; success on any of them (a refused port still proves L3 reachability). */
