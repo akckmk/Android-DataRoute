@@ -32,8 +32,8 @@ internal class UdpFlow(
         try {
             socket.send(DatagramPacket(buf, off, len))
             engine.stats.up(path, len)
-        } catch (e: IOException) {
-            // e.g. ENETUNREACH while the network is flapping; UDP is lossy by contract
+        } catch (e: Exception) {
+            // e.g. ENETUNREACH while the network is flapping; UDP is lossy by contract, never let it reach the TUN loop
             engine.events("UDP $key via $path send failed: ${e.message}")
         }
     }

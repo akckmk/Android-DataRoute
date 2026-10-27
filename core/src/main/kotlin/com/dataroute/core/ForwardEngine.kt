@@ -31,6 +31,10 @@ interface Upstream {
     /** Returns a UDP socket already connect()ed to the destination. */
     @Throws(IOException::class)
     fun openUdp(path: Path, dstIp: Int, dstPort: Int): DatagramSocket
+
+    /** An unconnected UDP socket on [path] (multicast DNS replies arrive from the answering host, not the group). */
+    @Throws(IOException::class)
+    fun openUdpRaw(path: Path): DatagramSocket = throw IOException("raw UDP not supported")
 }
 
 data class FlowKey(val clientIp: Int, val clientPort: Int, val dstIp: Int, val dstPort: Int) {
@@ -61,6 +65,8 @@ class ForwardEngine(
     internal val upstream: Upstream,
     internal val router: Router,
     internal val events: (String) -> Unit = {},
+    /** Answers home-network names (homeassistant.local, nas.lan…) that the carrier's DNS can't. */
+    private val localDns: LocalDns? = null,
 ) {
     companion object {
         const val MSS = 1400
@@ -132,6 +138,7 @@ class ForwardEngine(
     private fun handleUdp(ip: Ipv4) {
         val d = UdpDatagram(ip)
         if (!d.valid || d.payloadLen < 0) return
+        if (d.dstPort == 53 && localDns != null && interceptDns(ip, d)) return
         val key = FlowKey(ip.src, d.srcPort, ip.dst, d.dstPort)
         var flow = udp[key]
         if (flow == null) {
@@ -153,6 +160,21 @@ class ForwardEngine(
             }
         }
         flow.send(ip.buf, d.payloadOffset, d.payloadLen)
+    }
+
+    /** Returns true when the query was for a local name and is being answered here. */
+    private fun interceptDns(ip: Ipv4, d: UdpDatagram): Boolean {
+        val dns = localDns ?: return false
+        val query = ip.buf.copyOfRange(d.payloadOffset, d.payloadOffset + d.payloadLen)
+        val plan = dns.plan(query, query.size) ?: return false
+        val client = ip.src; val clientPort = d.srcPort; val server = ip.dst
+        executor.execute {
+            val reply = try { dns.resolve(plan, query) } catch (e: Exception) { return@execute }
+            if (stopped || reply.size > 1500 - 28) return@execute // too big for one packet: the app retries
+            sink.write(PacketBuilder.udp(server, 53, client, clientPort, reply, 0, reply.size))
+            events("DNS ${plan.question.name} answered via ${plan.kind}")
+        }
+        return true
     }
 
     internal fun removeTcp(key: FlowKey, f: TcpFlow) {
