@@ -8,6 +8,9 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -53,8 +56,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun addService(kind: ServiceKind, name: String, host: String, port: Int) {
         val c = _config.value
-        save(c.copy(services = c.services + HomeService(UUID.randomUUID().toString(), kind, name.trim(), host.trim(), port)))
-        checkServices()
+        val reloading = save(c.copy(services = c.services + HomeService(UUID.randomUUID().toString(), kind, name.trim(), host.trim(), port)))
+        if (!reloading) { checkServices(); return }
+        // The tunnel is being rebuilt: probing now would race it, so check once it's back.
+        viewModelScope.launch {
+            withTimeoutOrNull(3_000) { vpnState.first { it != VpnState.RUNNING } } // the rebuild has begun
+            withTimeoutOrNull(15_000) { vpnState.first { it == VpnState.RUNNING } }
+            delay(300)
+            checkServices()
+        }
     }
 
     fun removeService(id: String) {
@@ -80,12 +90,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun appInstalled(pkg: String?): Boolean =
         pkg != null && getApplication<Application>().packageManager.getLaunchIntentForPackage(pkg) != null
 
-    /** Persists the settings and, if the tunnel is up, rebuilds it so they take effect. */
-    fun save(c: Config) {
+    /**
+     * Persists the settings and, if the tunnel is up and something that affects routing changed, rebuilds it.
+     * Returns true when a rebuild was started.
+     */
+    fun save(c: Config): Boolean {
+        val old = _config.value
         prefs.save(c)
         _config.value = c
-        if (vpnState.value != VpnState.STOPPED) RouteVpnService.reload(getApplication())
+        val reload = vpnState.value != VpnState.STOPPED && affectsTunnel(old, c)
+        if (reload) RouteVpnService.reload(getApplication())
+        return reload
     }
+
+    /** The service list and certificate choice don't change the tunnel unless they change which prefixes are local. */
+    private fun affectsTunnel(a: Config, b: Config): Boolean =
+        a.copy(services = emptyList(), acceptNvrCert = true) != b.copy(services = emptyList(), acceptNvrCert = true) ||
+            a.localNets(null) != b.localNets(null)
 
     fun runTests() {
         if (_testing.value) return
