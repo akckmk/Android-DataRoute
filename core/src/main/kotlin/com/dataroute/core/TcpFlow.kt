@@ -62,6 +62,19 @@ internal class TcpFlow(
 
     private fun nowMs() = System.nanoTime() / 1_000_000
 
+    /** A short, plain reason for the Log (raw socket errors are long and leak local addresses and ports). */
+    private fun shortReason(e: Exception): String {
+        val m = (e.message ?: "") + " " + (e.cause?.message ?: "")
+        return when {
+            m.contains("virtual DNS") -> "Private DNS probe (expected)"
+            m.contains("ECONNREFUSED") || m.contains("refused", ignoreCase = true) -> "refused"
+            e is java.net.SocketTimeoutException || m.contains("timed out", ignoreCase = true) || m.contains("ETIMEDOUT") -> "timed out"
+            m.contains("unreachable", ignoreCase = true) -> "unreachable"
+            m.contains("not connected", ignoreCase = true) || m.contains("No cellular", ignoreCase = true) -> e.message ?: "no network"
+            else -> e.javaClass.simpleName
+        }
+    }
+
     // ---- connection setup / upstream side (runs on a pool thread) ----
 
     fun run() {
@@ -70,7 +83,7 @@ internal class TcpFlow(
             engine.upstream.openTcp(path, key.dstIp, key.dstPort)
         } catch (e: Exception) {
             engine.stats.tcpFailed.incrementAndGet()
-            engine.events("TCP $key via $path failed: ${e.message ?: e.javaClass.simpleName}")
+            engine.events("TCP $key via $path failed: ${shortReason(e)}")
             lock.withLock {
                 if (!closed) {
                     emit(PacketBuilder.tcp(key.dstIp, key.dstPort, key.clientIp, key.clientPort, 0, rcvNxt, TCP_RST or TCP_ACK, 0))
