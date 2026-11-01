@@ -84,6 +84,12 @@ Plex, Jellyfin, a NAS (Synology, QNAP, TrueNAS, Unraid), Pi-hole, Frigate, Nextc
   engine is covered by automated tests; the rest is verified by compiling against the Android SDK and by the
   in-app **Run tests** button on your phone.
 
+## Security
+
+See [SECURITY.md](SECURITY.md) for the threat model, the review findings and the attack tests that run in CI.
+Release APKs are signed with a key kept in GitHub Secrets (`DATAROUTE_KEYSTORE_B64`, `DATAROUTE_KEYSTORE_PASSWORD`);
+without them CI still builds and tests, but doesn't update the download link.
+
 ## Building
 
 ```

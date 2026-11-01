@@ -33,7 +33,12 @@ object Diagnostics {
             if (tunnelUp) out += tcp("NVR $nvr through tunnel", null, nvr)
         }
         out += http("Internet via cellular (direct)", snap.cellular.network, snap.cellular.connected)
-        out += http("Internet via Wi-Fi (direct)", snap.wifi.network, snap.wifi.connected)
+        out += http("Internet via Wi-Fi (direct)", snap.wifi.network, snap.wifi.connected).let {
+            // During an outage this is expected, not a fault: say so instead of showing a red cross.
+            if (it.ok == false && snap.wifi.connected && !snap.wifi.validated) {
+                it.copy(ok = null, detail = "No internet on Wi-Fi right now. That's the outage DataRoute covers: internet goes over cellular.")
+            } else it
+        }
         if (tunnelUp) {
             out += lookup("Name lookup through tunnel")
             out += http("Internet through tunnel", null, true)

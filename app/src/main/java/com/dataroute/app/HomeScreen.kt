@@ -100,7 +100,7 @@ fun HomeScreen(vm: MainViewModel, onToggle: () -> Unit, onOpenServices: () -> Un
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onOpenServices, shape = RoundedCornerShape(50)) { Text("See services") }
-                OutlinedButton(onClick = { launchProtect(ctx) }, shape = RoundedCornerShape(50)) { Text("Open UniFi Protect") }
+                OutlinedButton(onClick = { launchProtect(ctx) }, shape = RoundedCornerShape(50)) { Text("Protect app", maxLines = 1) }
             }
             if (cfg.nvrHost.isNotBlank()) {
                 OutlinedButton(

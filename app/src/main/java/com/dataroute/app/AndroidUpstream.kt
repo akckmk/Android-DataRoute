@@ -45,6 +45,12 @@ class AndroidUpstream(private val vpn: VpnService) : Upstream {
         return InetAddress.getByAddress(prefix.toByteArray() + Ip.toBytes(dstIp))
     }
 
+    private fun isUnreachable(e: IOException): Boolean {
+        if (e is java.net.NoRouteToHostException) return true
+        val m = (e.message ?: "") + " " + (e.cause?.message ?: "")
+        return m.contains("unreachable", ignoreCase = true) || m.contains("ENETUNREACH") || m.contains("EHOSTUNREACH")
+    }
+
     override fun openTcp(path: Path, dstIp: Int, dstPort: Int): Socket {
         // The virtual DNS address only answers UDP/53 (inside the engine). Refuse anything else at once, e.g. the
         // DNS-over-TLS probe Android's "Automatic" Private DNS makes, so it falls back to plain DNS without a wait.
@@ -53,8 +59,9 @@ class AndroidUpstream(private val vpn: VpnService) : Upstream {
         return try {
             tcp(network, InetAddress.getByAddress(Ip.toBytes(dstIp)), dstPort)
         } catch (e: IOException) {
-            val v6 = nat64(path, dstIp) ?: throw e
-            tcp(network, v6, dstPort)
+            // Only "no IPv4 route" means NAT64 might help; a timeout or refusal would just double the wait.
+            val v6 = if (isUnreachable(e)) nat64(path, dstIp) else null
+            tcp(network, v6 ?: throw e, dstPort)
         }
     }
 
@@ -79,8 +86,8 @@ class AndroidUpstream(private val vpn: VpnService) : Upstream {
         return try {
             udp(network, InetAddress.getByAddress(Ip.toBytes(dstIp)), dstPort)
         } catch (e: IOException) {
-            val v6 = nat64(path, dstIp) ?: throw e
-            udp(network, v6, dstPort)
+            val v6 = if (isUnreachable(e)) nat64(path, dstIp) else null
+            udp(network, v6 ?: throw e, dstPort)
         }
     }
 
@@ -104,11 +111,13 @@ class AndroidUpstream(private val vpn: VpnService) : Upstream {
             if (!vpn.protect(sock)) return null
             network.bindSocket(sock)
             sock.soTimeout = timeoutMs
-            sock.send(java.net.DatagramPacket(query, query.size, InetSocketAddress(server, 53)))
+            sock.connect(InetSocketAddress(server, 53)) // only the server we asked can answer
+            sock.send(java.net.DatagramPacket(query, query.size))
             val buf = ByteArray(4096)
             val p = java.net.DatagramPacket(buf, buf.size)
             sock.receive(p)
-            if (p.length >= 12 && buf[0] == query[0] && buf[1] == query[1]) buf.copyOf(p.length) else null
+            val reply = buf.copyOf(p.length)
+            if (p.length >= 12 && buf[0] == query[0] && buf[1] == query[1] && com.dataroute.core.Dns.answersQuestion(query, reply)) reply else null
         } catch (e: Exception) {
             null
         } finally {

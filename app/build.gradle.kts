@@ -17,21 +17,29 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // One fixed (debug-grade) key for every build, so a newer APK installs over the old one.
+    // Builds are signed with the owner's private key when CI provides it through GitHub Secrets
+    // (DATAROUTE_KEYSTORE_FILE / DATAROUTE_KEYSTORE_PASSWORD). The key never lives in this public repo: anyone
+    // holding it could publish an "update" that inherits the app's VPN permission. Without it (local builds,
+    // forks) Android's per-machine debug key is used, which is fine for testing.
+    val ownerKeystore = System.getenv("DATAROUTE_KEYSTORE_FILE")?.let { file(it) }?.takeIf { it.exists() }
     signingConfigs {
-        getByName("debug") {
-            storeFile = rootProject.file("keystore/dataroute-debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        if (ownerKeystore != null) {
+            create("owner") {
+                storeFile = ownerKeystore
+                storePassword = System.getenv("DATAROUTE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("DATAROUTE_KEY_ALIAS") ?: "dataroute"
+                keyPassword = System.getenv("DATAROUTE_KEYSTORE_PASSWORD")
+            }
         }
     }
 
     buildTypes {
+        debug {
+            if (ownerKeystore != null) signingConfig = signingConfigs.getByName("owner")
+        }
         release {
             isMinifyEnabled = false
-            // Signed with the debug key so the CI-built release APK is directly installable.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (ownerKeystore != null) "owner" else "debug")
         }
     }
 

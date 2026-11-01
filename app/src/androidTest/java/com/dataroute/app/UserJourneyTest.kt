@@ -78,6 +78,9 @@ class UserJourneyTest {
 
             // 6. Log of every routed connection
             compose.onNodeWithText("Log").performClick()
+            compose.waitForIdle()
+            // The Log tab must actually open (an earlier run captured the Home screen here).
+            waitForText("Every connection and the network it took, newest first.", 10_000)
             screenshot("07_log")
 
             // 7. Stop

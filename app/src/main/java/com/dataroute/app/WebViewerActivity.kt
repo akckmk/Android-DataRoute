@@ -9,8 +9,10 @@ import android.os.Bundle
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.net.http.SslCertificate
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -20,6 +22,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.dataroute.core.Ip
 import com.dataroute.core.LocalDns
 import com.dataroute.core.RoutePolicy
+import com.dataroute.core.TrustOnFirstUse
 
 /**
  * In-app browser for home services' web pages (UniFi Protect, Home Assistant, Plex, Jellyfin, a NAS…).
@@ -30,6 +33,12 @@ class WebViewerActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_URL = "url"
         private const val EXTRA_TITLE = "title"
+        private const val PINS = "cert_pins"
+
+        /** Remembered home-device certificates (host:port → SHA-256). */
+        fun pins(ctx: Context) = ctx.applicationContext.getSharedPreferences(PINS, Context.MODE_PRIVATE)
+
+        fun forgetPins(ctx: Context) = pins(ctx).edit().clear().apply()
 
         fun intent(ctx: Context, url: String, title: String): Intent =
             Intent(ctx, WebViewerActivity::class.java).putExtra(EXTRA_URL, url).putExtra(EXTRA_TITLE, title)
@@ -59,11 +68,36 @@ class WebViewerActivity : ComponentActivity() {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
-            settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
             webChromeClient = WebChromeClient()
             webViewClient = object : WebViewClient() {
                 override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
-                    if (cfg.acceptNvrCert && isLocalHost(Uri.parse(error.url).host, cfg)) handler.proceed() else handler.cancel()
+                    val uri = Uri.parse(error.url)
+                    val host = uri.host
+                    if (!cfg.acceptNvrCert || host == null || !isLocalHost(host, cfg)) { handler.cancel(); return }
+                    // Trust on first use: remember this device's certificate, refuse a different one later.
+                    val der = certificateDer(error.certificate)
+                    if (der == null) { handler.cancel(); return }
+                    val port = if (uri.port > 0) uri.port else 443
+                    val prefs = pins(this@WebViewerActivity)
+                    val tofu = TrustOnFirstUse({ prefs.getString(it, null) }, { k, v -> prefs.edit().putString(k, v).apply() })
+                    when (tofu.check(host, port, der)) {
+                        TrustOnFirstUse.Verdict.FIRST_USE_TRUSTED, TrustOnFirstUse.Verdict.MATCHES -> handler.proceed()
+                        TrustOnFirstUse.Verdict.CHANGED -> {
+                            handler.cancel()
+                            view.loadDataWithBaseURL(
+                                null, changedCertificatePage(host), "text/html", "utf-8", null,
+                            )
+                        }
+                    }
+                }
+
+                // Web pages only: never let a page launch other apps or open local files (intent:, file:, content:…).
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                    val scheme = request.url.scheme?.lowercase()
+                    return scheme != "http" && scheme != "https"
                 }
             }
         }
@@ -89,6 +123,25 @@ class WebViewerActivity : ComponentActivity() {
             url != null -> web.loadUrl(url)
             else -> web.loadData("<h3 style='font-family:sans-serif'>Add the address in DataRoute first.</h3>", "text/html", "utf-8")
         }
+    }
+
+    private fun certificateDer(cert: SslCertificate): ByteArray? =
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            cert.x509Certificate?.encoded
+        } else {
+            SslCertificate.saveState(cert)?.getByteArray("x509-certificate")
+        }
+
+    private fun changedCertificatePage(host: String): String {
+        val safeHost = android.text.TextUtils.htmlEncode(host)
+        return """
+            <html><body style="font-family:sans-serif;padding:24px;line-height:1.5;color:#23213A;background:#F6F4FF">
+            <h2 style="color:#C0262C">Blocked: this device's certificate changed</h2>
+            <p><b>$safeHost</b> presented a different certificate from the one DataRoute remembered.</p>
+            <p>If you're not on your home network, something may be pretending to be your device. Don't sign in.</p>
+            <p>If you replaced or reset the device at home, go to DataRoute <b>Settings</b> and tap
+            <b>Forget trusted certificates</b>, then open it again.</p></body></html>
+        """.trimIndent()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

@@ -183,4 +183,36 @@ class LocalDnsTest {
             engine.stop()
         }
     }
+
+    @Test fun spoofedRepliesAreIgnored() {
+        // The real server answers late; an impostor answers first, from another address, with the right ID.
+        val real = DatagramSocket(0, InetAddress.getByName("127.0.0.1"))
+        val impostor = DatagramSocket(0, InetAddress.getByName("127.0.0.2"))
+        val good = Ip.parse("192.168.1.20")!!; val evil = Ip.parse("6.6.6.6")!!
+        thread(isDaemon = true) {
+            val buf = ByteArray(512); val p = DatagramPacket(buf, buf.size)
+            real.receive(p)
+            val q = buf.copyOf(p.length)
+            // 1) impostor: right ID, different source address
+            val forged = Dns.answer(q, Dns.parseQuestion(q, q.size)!!, listOf(evil))
+            impostor.send(DatagramPacket(forged, forged.size, p.socketAddress))
+            // 2) real server, but answering a different question with the right ID
+            val other = query("other.lan", id = Dns.id(q))
+            val wrongQ = Dns.answer(other, Dns.parseQuestion(other, other.size)!!, listOf(evil))
+            real.send(DatagramPacket(wrongQ, wrongQ.size, p.socketAddress))
+            Thread.sleep(100)
+            // 3) the genuine answer
+            val r = Dns.answer(q, Dns.parseQuestion(q, q.size)!!, listOf(good))
+            real.send(DatagramPacket(r, r.size, p.socketAddress))
+        }
+        val up = object : Upstream {
+            override fun openTcp(path: Path, dstIp: Int, dstPort: Int) = Socket()
+            override fun openUdp(path: Path, dstIp: Int, dstPort: Int) = DatagramSocket()
+            override fun openUdpRaw(path: Path) = DatagramSocket(0, InetAddress.getByName("127.0.0.1"))
+        }
+        val r = UpstreamDnsTransport(up).exchange(Path.WIFI, Ip.parse("127.0.0.1")!!, real.localPort, query("nas.lan"), 3000)
+        assertNotNull(r)
+        assertEquals(listOf(good), answers(r), "only the genuine reply is accepted")
+        real.close(); impostor.close()
+    }
 }

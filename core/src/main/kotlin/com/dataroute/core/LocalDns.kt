@@ -18,9 +18,13 @@ object Dns {
 
     fun id(b: ByteArray): Int = b.u16(0)
 
-    fun parseQuestion(b: ByteArray, len: Int): Question? {
-        if (len < 17) return null
-        if ((b.u8(2) and 0x80) != 0) return null // a response, not a query
+    /** Safe to put in a log line: printable ASCII only, bounded length. */
+    fun printable(name: String): String =
+        name.take(100).map { if (it.code in 0x21..0x7E) it else '?' }.joinToString("")
+
+    fun parseQuestion(b: ByteArray, len: Int, allowResponse: Boolean = false): Question? {
+        if (len < 17 || len > b.size) return null
+        if (!allowResponse && (b.u8(2) and 0x80) != 0) return null // a response, not a query
         if (b.u16(4) < 1) return null
         val sb = StringBuilder()
         var i = 12
@@ -30,11 +34,18 @@ object Dns {
             if (l == 0) { i++; break }
             if ((l and 0xC0) != 0 || i + 1 + l > len || sb.length + l > 253) return null // no compression in questions
             if (sb.isNotEmpty()) sb.append('.')
-            for (k in 1..l) sb.append(b[i + k].toInt().toChar())
+            for (k in 1..l) sb.append((b[i + k].toInt() and 0xFF).toChar())
             i += 1 + l
         }
         if (i + 4 > len) return null
         return Question(sb.toString().lowercase(), b.u16(i), i + 4)
+    }
+
+    /** True when [reply] answers the same question as [query] (name case-insensitively, type and class). */
+    fun answersQuestion(query: ByteArray, reply: ByteArray): Boolean {
+        val q = parseQuestion(query, query.size) ?: return false
+        val r = parseQuestion(reply, reply.size, allowResponse = true) ?: return false
+        return q.name == r.name && q.type == r.type && query.u16(q.end - 2) and 0x7FFF == reply.u16(r.end - 2) and 0x7FFF
     }
 
     /** An empty reply with the TC bit set: "too big for UDP". */
@@ -64,14 +75,20 @@ fun interface DnsTransport {
     fun exchange(path: Path, server: Int, port: Int, query: ByteArray, timeoutMs: Int): ByteArray?
 }
 
-/** [DnsTransport] over unconnected sockets from [Upstream] (unconnected so mDNS replies from any host are accepted). */
+/**
+ * [DnsTransport] over sockets from [Upstream]. Unicast queries use a connected socket, so only the server we asked
+ * can answer; multicast DNS must accept a reply from whichever host owns the name. Either way a reply counts only if
+ * it carries our ID and echoes our question, which makes blind spoofing from the LAN much harder.
+ */
 class UpstreamDnsTransport(private val upstream: Upstream) : DnsTransport {
     override fun exchange(path: Path, server: Int, port: Int, query: ByteArray, timeoutMs: Int): ByteArray? {
         val s = try { upstream.openUdpRaw(path) } catch (e: IOException) { return null }
         s.use {
             val deadline = System.nanoTime() + timeoutMs * 1_000_000L
             try {
-                it.send(DatagramPacket(query, query.size, InetAddress.getByAddress(Ip.toBytes(server)), port))
+                val addr = InetAddress.getByAddress(Ip.toBytes(server))
+                if (!addr.isMulticastAddress) it.connect(addr, port)
+                it.send(DatagramPacket(query, query.size, addr, port))
                 val buf = ByteArray(4096)
                 while (true) {
                     val left = ((deadline - System.nanoTime()) / 1_000_000).toInt()
@@ -79,7 +96,9 @@ class UpstreamDnsTransport(private val upstream: Upstream) : DnsTransport {
                     it.soTimeout = left
                     val p = DatagramPacket(buf, buf.size)
                     it.receive(p)
-                    if (p.length >= 12 && buf.u16(0) == Dns.id(query) && (buf.u8(2) and 0x80) != 0) return buf.copyOf(p.length)
+                    if (p.length < 12 || buf.u16(0) != Dns.id(query) || (buf.u8(2) and 0x80) == 0) continue
+                    val reply = buf.copyOf(p.length)
+                    if (Dns.answersQuestion(query, reply)) return reply
                 }
             } catch (e: SocketTimeoutException) {
                 return null

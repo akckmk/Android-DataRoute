@@ -39,7 +39,8 @@ internal class UdpFlow(
     }
 
     private fun receiveLoop() {
-        val buf = ByteArray(65535)
+        // One byte over the limit is enough to tell an oversized datagram (dropped below) from a full one.
+        val buf = ByteArray(MAX_PAYLOAD + 1)
         val dp = DatagramPacket(buf, buf.size)
         while (!closed) {
             try {

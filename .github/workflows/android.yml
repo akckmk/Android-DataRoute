@@ -5,23 +5,52 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Least privilege by default; the two jobs that write to the repo ask for it themselves.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    outputs:
+      signed: ${{ steps.key.outputs.signed }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-      - uses: gradle/actions/setup-gradle@v4
+      # Third-party actions are pinned to exact commits so a moved tag can't change what runs here.
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
 
-      - name: Unit tests (packet forwarder)
+      # The signing key comes from the repository's secrets, never from the (public) repo. Without it the APK is
+      # signed with a throwaway debug key and is not published to the download link.
+      - name: Prepare signing key
+        id: key
+        env:
+          KEYSTORE_B64: ${{ secrets.DATAROUTE_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.DATAROUTE_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/dataroute.keystore"
+            echo "DATAROUTE_KEYSTORE_FILE=$RUNNER_TEMP/dataroute.keystore" >> "$GITHUB_ENV"
+            echo "DATAROUTE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No signing key in secrets (DATAROUTE_KEYSTORE_B64 / DATAROUTE_KEYSTORE_PASSWORD): building with a throwaway debug key; the download link will not be updated."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Unit tests (packet engine, DNS, fuzzing)
         run: ./gradlew :core:test --no-daemon
 
       - name: Build APK
         run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Remove signing key from the runner
+        if: always()
+        run: rm -f "$RUNNER_TEMP/dataroute.keystore"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -38,19 +67,18 @@ jobs:
   # Runs the real APK on an Android 16 emulator shaped like a Galaxy S26 Ultra
   # (1440x3120 QHD+ panel at 600 dpi = the same 384dp layout width as the phone's default display settings).
   # This is a stock Android image: it checks our app on that screen and OS version, not Samsung's One UI.
+  # Read-only: it runs a third-party action and the app's own test code, so it gets no write access.
   emulator:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    permissions:
-      contents: write   # to commit the screenshots back to docs/screenshots on this branch
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
 
       - name: Enable KVM
         run: |
@@ -67,7 +95,7 @@ jobs:
         run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
 
       - name: Run on "Galaxy S26 Ultra" emulator
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 36
           target: google_apis
@@ -85,9 +113,38 @@ jobs:
             mkdir -p emulator-screens && adb pull /data/local/tmp/dataroute-screens/. emulator-screens/ || true
             test ! -f tests_failed
 
-      # Keeps the latest screenshots browsable in the repo (pushes made with GITHUB_TOKEN don't trigger CI again).
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-screenshots
+          path: emulator-screens
+          if-no-files-found: warn
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-test-report
+          path: app/build/reports/androidTests/connected
+          if-no-files-found: warn
+
+  # Keeps the latest screenshots browsable in the repo. Runs only first-party actions plus git, with write access.
+  # Pushes made with GITHUB_TOKEN don't trigger CI again.
+  screenshots:
+    needs: emulator
+    if: always() && github.event_name == 'push' && needs.emulator.result != 'skipped' && needs.emulator.result != 'cancelled'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: emulator-screenshots
+          path: emulator-screens
       - name: Commit screenshots to docs/screenshots
-        if: always() && github.event_name == 'push'
         env:
           BRANCH: ${{ github.ref_name }}
         run: |
@@ -105,26 +162,11 @@ jobs:
           done
           exit 1
 
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: emulator-screenshots
-          path: emulator-screens
-          if-no-files-found: warn
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: emulator-test-report
-          path: app/build/reports/androidTests/connected
-          if-no-files-found: warn
-
-  # One permanent link to the newest *tested* APK:
+  # One permanent link to the newest *tested* APK signed with the owner's key:
   #   https://github.com/<owner>/<repo>/releases/download/latest/DataRoute.apk
-  # Runs only after both the build and the emulator tests passed on a push.
   release:
     needs: [build, emulator]
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && needs.build.outputs.signed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -140,11 +182,14 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           cp apk/app-debug.apk DataRoute.apk
+          SHA256=$(sha256sum DataRoute.apk | cut -d' ' -f1)
           NOTES="Newest tested build of DataRoute: commit ${GITHUB_SHA::7} on ${GITHUB_REF_NAME}, $(date -u '+%Y-%m-%d %H:%M UTC').
-          Passed the packet-engine unit tests and the instrumented tests on an Android 16 emulator.
+          Passed the unit tests (packet engine, DNS, fuzzing) and the instrumented tests on an Android 16 emulator.
+
+          SHA-256 of DataRoute.apk: ${SHA256}
 
           Install: open DataRoute.apk on your phone and allow installs from your browser or Files app.
-          Signed with the project's fixed debug-grade key, so it installs over earlier builds from this release."
+          Signed with the owner's private key (kept in GitHub Secrets), so it installs over earlier builds from this release."
           # Recreate so the 'latest' tag always points at this commit; the download URL stays the same.
           gh release delete latest --cleanup-tag --yes 2>/dev/null || true
           gh release create latest DataRoute.apk --target "$GITHUB_SHA" --title "DataRoute (latest tested build)" --notes "$NOTES" --latest

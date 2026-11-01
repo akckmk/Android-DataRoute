@@ -177,7 +177,9 @@ class RouteVpnService : VpnService() {
                     while (true) {
                         val n = input.read(buf)
                         if (n < 0) break
-                        if (n > 0) eng.onPacket(buf, n)
+                        // onPacket never throws by contract; this guard keeps one bad packet from ever stopping
+                        // the loop (which would silently cut every app off) even if that contract were broken.
+                        if (n > 0) try { eng.onPacket(buf, n) } catch (e: Exception) { EventLog.add("Packet error: ${e.javaClass.simpleName}") }
                     }
                 } catch (_: IOException) { /* closed */ }
             }

@@ -7,6 +7,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -82,6 +83,8 @@ class ForwardEngine(
         const val MSS = 1400
         const val MAX_TCP_FLOWS = 1024
         const val MAX_UDP_FLOWS = 1024
+        /** DNS lookups answered at once; beyond this, queries are dropped and the app's resolver retries. */
+        const val MAX_DNS_IN_FLIGHT = 64
     }
 
     val stats = Stats()
@@ -95,20 +98,30 @@ class ForwardEngine(
     private val tcp = ConcurrentHashMap<FlowKey, TcpFlow>()
     private val udp = ConcurrentHashMap<FlowKey, UdpFlow>()
     @Volatile private var stopped = false
+    private val dnsSlots = Semaphore(MAX_DNS_IN_FLIGHT)
+    /** Packets the engine had to drop because handling them failed unexpectedly. */
+    val malformedDropped = AtomicLong()
 
     init {
         timer.scheduleWithFixedDelay({ runCatching { tick() } }, 500, 500, TimeUnit.MILLISECONDS)
     }
 
-    /** Feed one packet read from the TUN device. [buf] may be reused by the caller afterwards. */
+    /**
+     * Feed one packet read from the TUN device. [buf] may be reused by the caller afterwards.
+     * Never throws: any app can put arbitrary bytes into the tunnel, and the reader loop must survive them.
+     */
     fun onPacket(buf: ByteArray, len: Int) {
         if (stopped) return
-        val ip = Ipv4(buf, len)
-        if (!ip.valid) return
-        when (ip.protocol) {
-            PROTO_TCP -> handleTcp(ip)
-            PROTO_UDP -> handleUdp(ip)
-            else -> Unit // ICMP etc. are not forwarded
+        try {
+            val ip = Ipv4(buf, minOf(len, buf.size))
+            if (!ip.valid) return
+            when (ip.protocol) {
+                PROTO_TCP -> handleTcp(ip)
+                PROTO_UDP -> handleUdp(ip)
+                else -> Unit // ICMP etc. are not forwarded
+            }
+        } catch (e: Exception) {
+            if (malformedDropped.incrementAndGet() <= 5) events("Dropped a packet that could not be handled: ${e.javaClass.simpleName}")
         }
     }
 
@@ -180,28 +193,37 @@ class ForwardEngine(
         val pub = publicDns
         if (plan == null && pub == null) return false
         val client = ip.src; val clientPort = d.srcPort; val server = ip.dst
-        executor.execute {
+        // Each lookup may block for seconds: cap them, or a burst of queries becomes thousands of threads.
+        if (!dnsSlots.tryAcquire()) return true // dropped; the app's resolver retries
+        val name = Dns.printable(question.name)
+        try { executor.execute {
+            try {
             val reply: ByteArray = try {
                 if (plan != null) {
-                    localDns!!.resolve(plan, query).also { events("DNS ${question.name} answered via ${plan.kind}") }
+                    localDns!!.resolve(plan, query).also { events("DNS $name answered via ${plan.kind}") }
                 } else {
                     val path = upstream.resolve(router.pathFor(server))
                     val answer = pub!!.resolve(path, query)
                     if (answer == null || answer.size < 12) {
-                        events("DNS ${question.name} failed via $path")
+                        events("DNS $name failed via $path")
                         Dns.answer(query, question, emptyList(), Dns.RCODE_SERVFAIL)
                     } else {
                         answer.also { it[0] = query[0]; it[1] = query[1] } // the app matches replies by ID
                     }
                 }
             } catch (e: Exception) {
-                events("DNS ${question.name} failed: ${e.message ?: e.javaClass.simpleName}")
+                events("DNS $name failed: ${e.javaClass.simpleName}")
                 Dns.answer(query, question, emptyList(), Dns.RCODE_SERVFAIL)
             }
             if (stopped) return@execute
             // Bigger than one packet: say so (TC bit) rather than staying silent.
             val out = if (reply.size > 1500 - 28) Dns.truncated(query, question) else reply
             sink.write(PacketBuilder.udp(server, 53, client, clientPort, out, 0, out.size))
+            } finally {
+                dnsSlots.release()
+            }
+        } } catch (e: java.util.concurrent.RejectedExecutionException) {
+            dnsSlots.release() // engine is stopping
         }
         return true
     }

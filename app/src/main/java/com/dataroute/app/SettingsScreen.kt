@@ -70,9 +70,17 @@ fun SettingsScreen(vm: MainViewModel) {
             )
             SwitchRow(
                 "Trust my home devices' certificates",
-                "In the built-in viewer only, and only for local addresses (NVR, NAS, Home Assistant…).",
+                "Built-in viewer, local addresses only. Each device's certificate is remembered the first time and a different one is refused.",
                 draft.acceptNvrCert,
             ) { draft = draft.copy(acceptNvrCert = it) }
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            OutlinedButton(
+                onClick = {
+                    WebViewerActivity.forgetPins(ctx)
+                    android.widget.Toast.makeText(ctx, "Trusted certificates forgotten", android.widget.Toast.LENGTH_SHORT).show()
+                },
+                shape = RoundedCornerShape(50),
+            ) { Text("Forget trusted certificates") }
         }
 
         Bubble {
